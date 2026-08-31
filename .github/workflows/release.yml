@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  build-tweak-and-release:
+    runs-on: macos-14
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Prepare Theos
+        uses: Randomblock1/theos-action@v1
+
+      - name: Prepare Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+
+      - name: Build host binaries
+        run: |
+          mkdir -p dist
+          GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o dist/jb-p1lot-darwin-arm64 ./cmd/jb-p1lot
+          GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o dist/jb-p1lot-darwin-amd64 ./cmd/jb-p1lot
+
+      - name: Build packages
+        run: make package FINALPACKAGE=1
+
+      - name: Extract Values
+        run: |
+          CONTROL=device/resources/control
+          PACKAGE=$(grep '^Package:' "$CONTROL" | cut -d ' ' -f 2)
+          VERSION=$(grep '^Version:' "$CONTROL" | cut -d ' ' -f 2)
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          ROOTLESS_DEB_FILE_NAME="${PACKAGE}_${VERSION}_iphoneos-arm64.deb"
+          echo "ROOTLESS_DEB_FILE_NAME=$ROOTLESS_DEB_FILE_NAME" >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          files: |
+            dist/*
+            .theos/obj/jb-p1lot-tweak.dylib
+            packages/${{ env.ROOTLESS_DEB_FILE_NAME }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          token: ${{ env.GITHUB_TOKEN }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update Repository
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.REPO_ACCESS_TOKEN }}
+          script: |
+            const assets = JSON.parse('${{ steps.create_release.outputs.assets }}');
+            const debAsset = assets.find(asset => asset.name === '${{ env.ROOTLESS_DEB_FILE_NAME }}');
+
+            if (!debAsset) {
+              core.setFailed('Could not find DEB asset in release');
+              return;
+            }
+
+            await github.rest.repos.createDispatchEvent({
+              owner: 'castdrian',
+              repo: 'apt-repo',
+              event_type: 'package-update',
+              client_payload: {
+                package_url: debAsset.browser_download_url,
+                package_name: '${{ env.ROOTLESS_DEB_FILE_NAME }}'
+              }
+            });

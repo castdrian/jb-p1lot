@@ -1,0 +1,6 @@
+interface:
+  display_name: "jb-p1lot"
+  short_description: "Operate a paired rootless iOS development device"
+  default_prompt: "Use $jb-p1lot to discover and operate my paired jailbreak device."
+policy:
+  allow_implicit_invocation: true

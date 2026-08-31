@@ -1,0 +1,17 @@
+interface:
+  display_name: "jb-p1lot"
+  short_description: "Operate a paired rootless iOS development device"
+  default_prompt: "Discover the paired jailbreak device and help me test my tweak."
+policy:
+  allow_implicit_invocation: true
+dependencies:
+  tools:
+    - type: "cli"
+      value: "jb-p1lot"
+      description: "jb-p1lot host CLI and stdio server"
+    - type: "cli"
+      value: "pymobiledevice3"
+      description: "Apple device discovery and developer services"
+    - type: "mcp"
+      value: "jb-p1lot"
+      description: "Bundled MCP server for the paired jailbreak device"

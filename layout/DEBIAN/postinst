@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+rm -f /var/jb/Library/MobileSubstrate/DynamicLibraries/JBP1lot.plist
+rm -f /var/jb/Library/MobileSubstrate/DynamicLibraries/JBP1lot.dylib
+rm -f /var/jb/Library/MobileSubstrate/DynamicLibraries/jbp1lot.plist
+rm -f /var/jb/Library/MobileSubstrate/DynamicLibraries/jbp1lot.dylib
+rm -f /var/jb/usr/libexec/jbp1lot-daemon
+exit 0

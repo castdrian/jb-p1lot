@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/castdrian/jb-p1lot/commands.schema.json",
+  "title": "jb-p1lot command",
+  "type": "object",
+  "required": ["device", "params"],
+  "properties": {
+    "device": {"type": "string"},
+    "params": {"type": "object"}
+  },
+  "additionalProperties": false
+}

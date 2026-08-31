@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "jb-p1lot": {
+      "command": "jb-p1lot",
+      "args": ["mcp"]
+    }
+  }
+}

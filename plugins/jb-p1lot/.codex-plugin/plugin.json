@@ -1,0 +1,33 @@
+{
+  "name": "jb-p1lot",
+  "version": "0.1.0",
+  "description": "Full rootless iOS jailbreak development and device automation bridge",
+  "author": {
+    "name": "adrian",
+    "url": "https://github.com/castdrian"
+  },
+  "homepage": "https://github.com/castdrian/jb-p1lot",
+  "repository": "https://github.com/castdrian/jb-p1lot",
+  "license": "GPL-3.0-or-later",
+  "keywords": ["ios", "jailbreak", "theos", "ellekit", "mcp", "tweak-development"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "jb-p1lot",
+    "shortDescription": "Automate a paired rootless iOS development device",
+    "longDescription": "A full MCP and CLI bridge for rootless jailbreak tweak development, UI automation, diagnostics, dynamic debugging, screen capture, and recovery.",
+    "developerName": "adrian",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "Write", "Execute", "Debug"],
+    "websiteURL": "https://github.com/castdrian/jb-p1lot",
+    "defaultPrompt": [
+      "Discover and target my paired jailbreak device.",
+      "Run a safe tweak build, deploy, log, and rollback cycle.",
+      "Inspect the foreground app and automate its UI."
+    ],
+    "brandColor": "#111827",
+    "composerIcon": "./assets/icon.svg",
+    "logo": "./assets/icon.svg",
+    "logoDark": "./assets/icon.svg"
+  }
+}

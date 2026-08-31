@@ -1,0 +1,11 @@
+Package: dev.adrian.jb-p1lot
+Name: jb-p1lot
+Version: 0.1.10
+Architecture: iphoneos-arm64
+Description: Rootless iOS MCP development bridge
+Maintainer: adrian
+Author: adrian
+Section: Development
+Priority: optional
+Depends: ellekit
+Icon: icon.png

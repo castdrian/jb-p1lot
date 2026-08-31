@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/castdrian/jb-p1lot/protocol.schema.json",
+  "title": "jb-p1lot frame",
+  "type": "object",
+  "required": ["version", "kind", "id"],
+  "properties": {
+    "version": {"type": "integer", "const": 1},
+    "kind": {"enum": ["request", "response", "event", "binary", "cancel", "error"]},
+    "id": {"type": "integer", "minimum": 1},
+    "stream": {"type": "integer", "minimum": 0},
+    "deadline": {"type": "integer", "minimum": 0},
+    "method": {"type": "string"},
+    "status": {"type": "string"},
+    "meta": {"type": "object", "additionalProperties": {"type": "string"}},
+    "payload": {},
+    "binary": {"type": "string", "contentEncoding": "base64"}
+  },
+  "additionalProperties": false
+}

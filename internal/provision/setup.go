@@ -60,7 +60,7 @@ func Run(ctx context.Context, options Options) (Report, error) {
 	if options.RepoRoot == "" {
 		options.RepoRoot, _ = os.Getwd()
 	}
-	report := Report{Version: "0.1.2", Platform: runtime.GOOS + "/" + runtime.GOARCH, Actions: []string{}}
+	report := Report{Version: "0.1.3", Platform: runtime.GOOS + "/" + runtime.GOARCH, Actions: []string{}}
 	report.Checks = checkTools(ctx)
 	identity, identityErr := EnsureIdentity()
 	report.Identity = identity

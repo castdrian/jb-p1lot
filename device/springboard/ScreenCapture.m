@@ -117,10 +117,11 @@ NSData *JBP1lotCapturePNG(void) {
     void (^capture)(void) = ^{
         if (JBP1lotDisplayIsEnabled())
             JBP1lotWakeDisplay();
-        image = JBP1lotCARenderImage();
         if (&_UICreateScreenUIImage)
-            if (!JBP1lotImageHasVisiblePixels(image))
-                image = _UICreateScreenUIImage();
+            image = _UICreateScreenUIImage();
+
+        if (!JBP1lotImageHasVisiblePixels(image))
+            image = JBP1lotCARenderImage();
 
         JBP1lotWindowImageFunction windowImage = (JBP1lotWindowImageFunction)dlsym(RTLD_DEFAULT, "CGWindowListCreateImage");
         if (!JBP1lotImageHasVisiblePixels(image) && windowImage) {

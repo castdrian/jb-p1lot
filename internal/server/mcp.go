@@ -11,7 +11,7 @@ import (
 )
 
 func New(registryValue *registry.Registry) *mcp.Server {
-	server := mcp.NewServer(&mcp.Implementation{Name: "jb-p1lot", Title: "jb-p1lot", Version: "0.1.2"}, &mcp.ServerOptions{
+	server := mcp.NewServer(&mcp.Implementation{Name: "jb-p1lot", Title: "jb-p1lot", Version: "0.1.3"}, &mcp.ServerOptions{
 		Instructions: "Use the jb-p1lot MCP server with the jb-p1lot skill for exact targeting, visual and semantic UI flows, tweak cycles, debugging, and userspace-only recovery.",
 		Logger:       slog.Default(),
 	})

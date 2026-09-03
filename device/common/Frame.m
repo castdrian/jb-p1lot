@@ -3,7 +3,7 @@
 NSString * const JBP1lotAgentSocketPath = @"/var/mobile/Library/Caches/jb-p1lot-agent.sock";
 NSString * const JBP1lotBonjourType = @"_jb-p1lot._tcp";
 uint16_t const JBP1lotPort = 5912;
-NSString * const JBP1lotVersionString = @"0.1.2";
+NSString * const JBP1lotVersionString = @"0.1.3";
 
 NSData *JBP1lotFrameForDictionary(NSDictionary *dictionary) {
     NSError *error = nil;

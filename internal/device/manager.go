@@ -226,9 +226,13 @@ func (m *Manager) invalidateClient(client *transport.Client) {
 }
 
 func (m *Manager) screenCapture(ctx context.Context, client *transport.Client, params map[string]any) (registry.Result, error) {
+	deviceID := client.Endpoint().ID
 	response, err := client.Call(ctx, "screen.capture", params)
 	if err != nil {
 		m.invalidateClient(client)
+		if result, fallbackErr := m.pymobiledeviceScreenshot(ctx, deviceID); fallbackErr == nil {
+			return result, nil
+		}
 		return registry.Result{}, err
 	}
 	data := response.Binary
@@ -242,6 +246,9 @@ func (m *Manager) screenCapture(ctx context.Context, client *transport.Client, p
 		}
 	}
 	if len(data) == 0 {
+		if result, fallbackErr := m.pymobiledeviceScreenshot(ctx, deviceID); fallbackErr == nil {
+			return result, nil
+		}
 		return m.responseResult("screen_capture", response)
 	}
 	path, err := m.artifacts.WriteBytes("screen.png", data)
@@ -249,6 +256,43 @@ func (m *Manager) screenCapture(ctx context.Context, client *transport.Client, p
 		return registry.Result{}, err
 	}
 	return registry.Result{Image: data, MIMEType: "image/png", ArtifactPath: path, Meta: map[string]any{"protectedLayers": false}}, nil
+}
+
+func (m *Manager) pymobiledeviceScreenshot(ctx context.Context, deviceID string) (registry.Result, error) {
+	tool, err := exec.LookPath("pymobiledevice3")
+	if err != nil {
+		return registry.Result{}, err
+	}
+	temporaryDirectory, err := os.MkdirTemp("", "jb-p1lot-screen-")
+	if err != nil {
+		return registry.Result{}, err
+	}
+	defer os.RemoveAll(temporaryDirectory)
+	outputPath := filepath.Join(temporaryDirectory, "screen.png")
+	arguments := []string{"developer", "dvt", "screenshot", "--userspace", "--udid", deviceID, outputPath}
+	command := exec.CommandContext(ctx, tool, arguments...)
+	if output, commandErr := command.CombinedOutput(); commandErr != nil {
+		mountCommand := exec.CommandContext(ctx, tool, "mounter", "auto-mount", "--userspace", "--udid", deviceID)
+		if mountOutput, mountErr := mountCommand.CombinedOutput(); mountErr != nil {
+			return registry.Result{}, fmt.Errorf("pymobiledevice3 screenshot failed: %s; auto-mount failed: %s", strings.TrimSpace(string(output)), strings.TrimSpace(string(mountOutput)))
+		}
+		command = exec.CommandContext(ctx, tool, arguments...)
+		if retryOutput, retryErr := command.CombinedOutput(); retryErr != nil {
+			return registry.Result{}, fmt.Errorf("pymobiledevice3 screenshot failed: %s", strings.TrimSpace(string(retryOutput)))
+		}
+	}
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		return registry.Result{}, err
+	}
+	if len(data) == 0 {
+		return registry.Result{}, errors.New("pymobiledevice3 returned an empty screenshot")
+	}
+	path, err := m.artifacts.WriteBytes("screen.png", data)
+	if err != nil {
+		return registry.Result{}, err
+	}
+	return registry.Result{Image: data, MIMEType: "image/png", ArtifactPath: path, Meta: map[string]any{"protectedLayers": false, "source": "pymobiledevice3"}}, nil
 }
 
 func (m *Manager) fileTransfer(ctx context.Context, client *transport.Client, params map[string]any) (registry.Result, error) {

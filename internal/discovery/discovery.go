@@ -177,7 +177,11 @@ func parseBonjour(value string) []Device {
 }
 
 func defaultRunner(ctx context.Context, command string, args ...string) ([]byte, error) {
-	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	timeout := 5 * time.Second
+	if command == "dns-sd" {
+		timeout = 500 * time.Millisecond
+	}
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	return exec.CommandContext(callCtx, command, args...).CombinedOutput()
 }

@@ -8,7 +8,7 @@ env:
 
 jobs:
   build-tweak-and-release:
-    runs-on: macos-14
+    runs-on: macos-latest
     permissions:
       contents: write
 
@@ -24,6 +24,11 @@ jobs:
         with:
           go-version: "1.25.x"
 
+      - name: Prepare GNU Make
+        run: |
+          brew install make
+          gmake --version
+
       - name: Build host binaries
         run: |
           mkdir -p dist
@@ -31,7 +36,7 @@ jobs:
           GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o dist/jb-p1lot-darwin-amd64 ./cmd/jb-p1lot
 
       - name: Build packages
-        run: make package FINALPACKAGE=1
+        run: gmake package FINALPACKAGE=1
 
       - name: Extract Values
         run: |

@@ -22,6 +22,33 @@ func TestSelectAcceptsExplicitAddress(t *testing.T) {
 	}
 }
 
+func TestSelectKeepsPinnedUDIDForSoleBonjourBridge(t *testing.T) {
+	pinnedID := "00008130-000A2D412182001C"
+	devices := []Device{{
+		ID:         "bonjour:Adrians-iPhone.local",
+		Name:       "Adrians-iPhone.local",
+		Connection: "wifi",
+		Address:    "Adrians-iPhone.local.",
+		Port:       5912,
+		Paired:     true,
+		Bridge:     true,
+	}}
+	device, err := Select(devices, pinnedID)
+	if err != nil || device.ID != pinnedID || device.Address != "Adrians-iPhone.local." || device.Port != 5912 {
+		t.Fatalf("device=%#v err=%v", device, err)
+	}
+}
+
+func TestSelectDoesNotGuessPinnedUDIDWithMultipleBridges(t *testing.T) {
+	devices := []Device{
+		{ID: "bonjour:one", Bridge: true, Address: "one.local"},
+		{ID: "bonjour:two", Bridge: true, Address: "two.local"},
+	}
+	if _, err := Select(devices, "00008130-000A2D412182001C"); err == nil {
+		t.Fatal("expected ambiguous pinned device to require a bridge selector")
+	}
+}
+
 func TestDiscoverMergesUSBDiagnostics(t *testing.T) {
 	runner := func(_ context.Context, command string, _ ...string) ([]byte, error) {
 		switch command {

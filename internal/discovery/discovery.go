@@ -107,6 +107,12 @@ func Select(devices []Device, selector string) (Device, error) {
 		if device, ok := directDevice(selector); ok {
 			return device, nil
 		}
+		if len(devices) == 1 && devices[0].Bridge && looksLikeDeviceID(selector) {
+			device := devices[0]
+			device.ID = selector
+			device.Paired = true
+			return device, nil
+		}
 		return Device{}, fmt.Errorf("device %q not found", selector)
 	}
 	if len(devices) == 1 {
@@ -120,6 +126,21 @@ func Select(devices []Device, selector string) (Device, error) {
 		candidates = append(candidates, fmt.Sprintf("%s (%s, %s)", device.ID, device.Name, device.Connection))
 	}
 	return Device{}, fmt.Errorf("device selector is required; candidates: %s", strings.Join(candidates, ", "))
+}
+
+func looksLikeDeviceID(value string) bool {
+	compact := strings.ReplaceAll(strings.TrimSpace(value), "-", "")
+	if len(compact) < 20 || len(compact) > 64 {
+		return false
+	}
+	for _, character := range compact {
+		if !((character >= '0' && character <= '9') ||
+			(character >= 'a' && character <= 'f') ||
+			(character >= 'A' && character <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 func directDevice(selector string) (Device, bool) {

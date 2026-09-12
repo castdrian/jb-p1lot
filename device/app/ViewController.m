@@ -312,7 +312,7 @@ extern char **environ;
 }
 
 - (void)restartBridge {
-    char *args[] = {"launchctl", "kickstart", "-k", "user/501/dev.adrian.jb-p1lot.daemon", NULL};
+    char *args[] = {"launchctl", "kickstart", "-k", "system/dev.adrian.jb-p1lot.daemon", NULL};
     pid_t pid = 0;
     posix_spawn(&pid, "/var/jb/usr/bin/launchctl", NULL, NULL, args, environ);
     self.statusLabel.text = @"Restart requested";

@@ -186,7 +186,17 @@ static BOOL JBP1lotPasteText(NSString *text) {
     return performed;
 }
 
-static BOOL JBP1lotHIDPoint(CGFloat x, CGFloat y, BOOL down);
+typedef NS_ENUM(NSInteger, JBP1lotHIDTouchPhase) {
+    JBP1lotHIDTouchPhaseBegin,
+    JBP1lotHIDTouchPhaseMove,
+    JBP1lotHIDTouchPhaseEnd
+};
+
+static BOOL JBP1lotHIDPointWithPhase(CGFloat x, CGFloat y, JBP1lotHIDTouchPhase phase);
+
+static BOOL JBP1lotHIDPoint(CGFloat x, CGFloat y, BOOL down) {
+    return JBP1lotHIDPointWithPhase(x, y, down ? JBP1lotHIDTouchPhaseBegin : JBP1lotHIDTouchPhaseEnd);
+}
 
 static BOOL JBP1lotKeyboardKeyPoint(unichar character, CGSize size, CGPoint *point, BOOL *shift) {
     CGFloat top = size.height - 216.0;
@@ -304,7 +314,7 @@ static CGPoint JBP1lotScreenPoint(CGFloat x, CGFloat y) {
     return CGPointMake(MIN(MAX(x, 0), width), MIN(MAX(y, 0), height));
 }
 
-static BOOL JBP1lotHIDPoint(CGFloat x, CGFloat y, BOOL down) {
+static BOOL JBP1lotHIDPointWithPhase(CGFloat x, CGFloat y, JBP1lotHIDTouchPhase phase) {
     JBP1lotHIDFunctions functions = JBP1lotHIDLoadFunctions();
     if (!functions.client || !functions.createDigitizerEvent || !functions.createFingerEvent || !functions.appendEvent || !functions.dispatchEvent) {
         return NO;
@@ -315,12 +325,27 @@ static BOOL JBP1lotHIDPoint(CGFloat x, CGFloat y, BOOL down) {
     CGFloat height = bounds.height > 1 ? bounds.height : 480;
     double normalizedX = MIN(MAX(point.x / width, 0), 1);
     double normalizedY = MIN(MAX(point.y / height, 0), 1);
-    uint32_t parentMask = 1 | 2 | 32;
-    if (!down) {
-        parentMask |= 4;
+    uint32_t parentMask = 0;
+    uint32_t childMask = 0;
+    BOOL touch = phase != JBP1lotHIDTouchPhaseEnd;
+    BOOL range = touch;
+    switch (phase) {
+        case JBP1lotHIDTouchPhaseBegin:
+            parentMask = 1 | 2 | 32;
+            childMask = 1 | 2;
+            break;
+        case JBP1lotHIDTouchPhaseMove:
+            parentMask = 4;
+            childMask = 4;
+            break;
+        case JBP1lotHIDTouchPhaseEnd:
+            parentMask = 1 | 2 | 4 | 32;
+            childMask = 1 | 2;
+            range = NO;
+            break;
     }
-    IOHIDEventRef parent = functions.createDigitizerEvent(kCFAllocatorDefault, mach_absolute_time(), 3, 1u << 22, 1, parentMask, 0, normalizedX, normalizedY, 0, down ? 1 : 0, 0, true, down, 0);
-    IOHIDEventRef child = functions.createFingerEvent(kCFAllocatorDefault, mach_absolute_time(), 3, 2, 1 | 2, normalizedX, normalizedY, 0, down ? 1 : 0, 0, true, down, 0);
+    IOHIDEventRef parent = functions.createDigitizerEvent(kCFAllocatorDefault, mach_absolute_time(), 3, 1u << 22, 1, parentMask, 0, normalizedX, normalizedY, 0, 0, 0, NO, touch, 0);
+    IOHIDEventRef child = functions.createFingerEvent(kCFAllocatorDefault, mach_absolute_time(), 3, 2, childMask, normalizedX, normalizedY, 0, 0, 0, range, touch, 0);
     if (!parent || !child) {
         if (functions.releaseValue) {
             if (parent) functions.releaseValue(parent);
@@ -653,7 +678,7 @@ BOOL JBP1lotInjectAction(NSDictionary *params) {
             totalSteps += MAX(1, (NSUInteger)ceil(distance / 12.0));
         }
         NSUInteger durationMs = MAX(40, MIN([params[@"durationMs"] unsignedIntegerValue] ?: 200, 2000));
-        if (!JBP1lotHIDPoint(startPoint.x, startPoint.y, YES))
+        if (!JBP1lotHIDPointWithPhase(startPoint.x, startPoint.y, JBP1lotHIDTouchPhaseBegin))
             return NO;
 
         NSUInteger completedSteps = 0;
@@ -666,8 +691,8 @@ BOOL JBP1lotInjectAction(NSDictionary *params) {
                 CGFloat fraction = (CGFloat)step / (CGFloat)segmentSteps;
                 CGPoint point = CGPointMake(from.x + ((to.x - from.x) * fraction),
                                             from.y + ((to.y - from.y) * fraction));
-                if (!JBP1lotHIDPoint(point.x, point.y, YES)) {
-                    JBP1lotHIDPoint(point.x, point.y, NO);
+                if (!JBP1lotHIDPointWithPhase(point.x, point.y, JBP1lotHIDTouchPhaseMove)) {
+                    JBP1lotHIDPointWithPhase(point.x, point.y, JBP1lotHIDTouchPhaseEnd);
                     return NO;
                 }
                 completedSteps += 1;
@@ -679,8 +704,8 @@ BOOL JBP1lotInjectAction(NSDictionary *params) {
             }
         }
         CGPoint lastPoint = points.lastObject.CGPointValue;
-        if (!JBP1lotHIDPoint(lastPoint.x, lastPoint.y, NO)) {
-            JBP1lotHIDPoint(lastPoint.x, lastPoint.y, NO);
+        if (!JBP1lotHIDPointWithPhase(lastPoint.x, lastPoint.y, JBP1lotHIDTouchPhaseEnd)) {
+            JBP1lotHIDPointWithPhase(lastPoint.x, lastPoint.y, JBP1lotHIDTouchPhaseEnd);
             return NO;
         }
         return YES;

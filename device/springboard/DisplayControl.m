@@ -96,7 +96,6 @@ static BOOL JBP1lotDisplayOverrideSet = NO;
 static BOOL JBP1lotRequestedDisplayEnabled = YES;
 
 void JBP1lotRegisterHomeButtonPress(void) {
-    BOOL displayWasEnabled = JBP1lotDisplayIsEnabled();
     CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
     if (now - JBP1lotLastHomePress > 1.0)
         JBP1lotHomePressCount = 0;
@@ -108,8 +107,6 @@ void JBP1lotRegisterHomeButtonPress(void) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             JBP1lotSetDisplayEnabled(nextEnabled);
         });
-    } else if (!displayWasEnabled) {
-        JBP1lotSetDisplayEnabled(NO);
     }
 }
 

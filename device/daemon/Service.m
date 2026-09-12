@@ -276,7 +276,10 @@ NSDictionary *JBP1lotHandleRequest(NSDictionary *request) {
         return result;
     }
     if ([method isEqualToString:@"metrics_stream"]) {
-        return JBP1lotRunResult(@"/var/jb/usr/bin/ltop -l 1 -s 0 -n 0; /usr/bin/vm_stat; /sbin/ifconfig", [params[@"durationMs"] integerValue] ?: 30000);
+        NSString *process = JBP1lotString(params, @"process");
+        NSString *processPattern = process.length > 0 ? JBP1lotQuote(process) : JBP1lotQuote(@"YouTube");
+        NSString *command = [NSString stringWithFormat:@"pid=$(ps -axo pid,args | /var/jb/usr/bin/grep -F %@ | /var/jb/usr/bin/grep -v grep | /var/jb/usr/bin/sed -n '1s/^[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p'); if [ -n \"$pid\" ]; then ps -p \"$pid\" -o pid,pcpu,rss,etime,comm; /var/jb/usr/bin/ltop -p \"$pid\" -r phys_mem 0; /var/jb/usr/bin/ltop -p \"$pid\" -r phys_footprint 0; /var/jb/usr/bin/ltop -p \"$pid\" -r cpu_time 0; fi; /usr/bin/vm_stat; exit 0", processPattern];
+        return JBP1lotRunResult(command, [params[@"durationMs"] integerValue] ?: 30000);
     }
     if ([method isEqualToString:@"network_capture"]) {
         NSString *path = [NSString stringWithFormat:@"/var/mobile/Media/jb-p1lot/capture-%@.pcap", NSUUID.UUID.UUIDString];

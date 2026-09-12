@@ -38,11 +38,13 @@ static NSDictionary *JBP1lotAgentResponse(NSDictionary *request) {
         if (frame.length > 0 && ![frame isEqualToString:JBP1lotFrameIdentifier]) {
             return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"invalid_frame", @"accessibility node frame expired") };
         }
+        CFTimeInterval actionStart = CFAbsoluteTimeGetCurrent();
         BOOL performed = JBP1lotInjectAction(params);
+        NSNumber *actionDuration = @((CFAbsoluteTimeGetCurrent() - actionStart) * 1000.0);
         if (!performed) {
             return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"backend_error", @"UI action unavailable") };
         }
-        return @{ @"status": @"ok", @"payload": @{ @"performed": @YES, @"displayEnabled": @(JBP1lotDisplayIsEnabled()) } };
+        return @{ @"status": @"ok", @"payload": @{ @"performed": @YES, @"displayEnabled": @(JBP1lotDisplayIsEnabled()), @"actionDurationMs": actionDuration } };
     }
     return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"backend_error", @"unsupported agent method") };
 }

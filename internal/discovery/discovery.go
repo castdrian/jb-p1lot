@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type Device struct {
@@ -35,6 +36,12 @@ type usbmuxRecord struct {
 	ProductVersion string `json:"ProductVersion"`
 	UniqueDeviceID string `json:"UniqueDeviceID"`
 	Identifier     string `json:"Identifier"`
+}
+
+type bonjourService struct {
+	instance string
+	typeName string
+	domain   string
 }
 
 type Runner func(context.Context, string, ...string) ([]byte, error)
@@ -70,19 +77,13 @@ func DiscoverWithRunner(ctx context.Context, run Runner) ([]Device, error) {
 			}
 		}
 	}
-	if output, err := run(ctx, "dns-sd", "-B", "_jb-p1lot._tcp", "local."); err == nil {
-		for _, record := range parseBonjour(string(output)) {
-			current := merged[record.ID]
-			if current.ID == "" {
-				current = record
+	if output, _ := run(ctx, "dns-sd", "-B", "_jb-p1lot._tcp", "local."); len(output) > 0 {
+		for _, service := range parseBonjourBrowse(string(output)) {
+			lookupOutput, _ := run(ctx, "dns-sd", "-L", service.instance, service.typeName, service.domain)
+			host, port, ok := parseBonjourLookup(string(lookupOutput))
+			if ok {
+				mergeBonjourEndpoint(merged, host, port)
 			}
-			current.Address = record.Address
-			current.Port = record.Port
-			current.Connection = "wifi"
-			current.Bridge = true
-			current.Paired = true
-			current.Source = "bonjour"
-			merged[current.ID] = current
 		}
 	}
 	devices := make([]Device, 0, len(merged))
@@ -179,9 +180,130 @@ func parseBonjour(value string) []Device {
 func defaultRunner(ctx context.Context, command string, args ...string) ([]byte, error) {
 	timeout := 5 * time.Second
 	if command == "dns-sd" {
-		timeout = 500 * time.Millisecond
+		timeout = 2 * time.Second
 	}
 	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	return exec.CommandContext(callCtx, command, args...).CombinedOutput()
+}
+
+func parseBonjourBrowse(value string) []bonjourService {
+	services := make([]bonjourService, 0)
+	seen := make(map[string]struct{})
+	scanner := bufio.NewScanner(strings.NewReader(value))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		serviceTypeIndex := -1
+		for index, field := range fields {
+			if strings.TrimSuffix(field, ".") == "_jb-p1lot._tcp" {
+				serviceTypeIndex = index
+				break
+			}
+		}
+		if serviceTypeIndex < 1 || serviceTypeIndex+1 >= len(fields) {
+			continue
+		}
+		if serviceTypeIndex > 1 && (fields[1] == "Rmv" || fields[1] == "Remove") {
+			continue
+		}
+		instance := strings.TrimSuffix(fields[serviceTypeIndex+1], ".")
+		domain := strings.TrimSuffix(fields[serviceTypeIndex-1], ".")
+		if instance == "" {
+			continue
+		}
+		if domain == "" {
+			domain = "local"
+		}
+		service := bonjourService{instance: instance, typeName: "_jb-p1lot._tcp", domain: domain + "."}
+		key := service.instance + "\x00" + service.typeName + "\x00" + service.domain
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		services = append(services, service)
+	}
+	return services
+}
+
+func parseBonjourLookup(value string) (string, int, bool) {
+	const marker = " can be reached at "
+	for _, line := range strings.Split(value, "\n") {
+		markerIndex := strings.Index(line, marker)
+		if markerIndex < 0 {
+			continue
+		}
+		address := strings.TrimSpace(line[markerIndex+len(marker):])
+		if end := strings.Index(address, " ("); end >= 0 {
+			address = address[:end]
+		}
+		host, portText, ok := splitBonjourAddress(address)
+		if !ok {
+			continue
+		}
+		port, err := strconv.Atoi(portText)
+		if err != nil || port < 1 || port > 65535 {
+			continue
+		}
+		return host, port, true
+	}
+	return "", 0, false
+}
+
+func splitBonjourAddress(value string) (string, string, bool) {
+	if host, port, err := net.SplitHostPort(value); err == nil {
+		return host, port, host != ""
+	}
+	separator := strings.LastIndex(value, ":")
+	if separator <= 0 || separator+1 >= len(value) {
+		return "", "", false
+	}
+	host := strings.Trim(value[:separator], "[]")
+	port := value[separator+1:]
+	return host, port, host != ""
+}
+
+func mergeBonjourEndpoint(merged map[string]Device, host string, port int) {
+	matchingID := ""
+	hostName := normalizeDeviceName(host)
+	for id, device := range merged {
+		if hostName != "" && hostName == normalizeDeviceName(device.Name) {
+			matchingID = id
+			break
+		}
+	}
+	if matchingID == "" && len(merged) == 1 {
+		for id := range merged {
+			matchingID = id
+		}
+	}
+	if matchingID == "" {
+		matchingID = "bonjour:" + strings.TrimSuffix(host, ".")
+	}
+	current := merged[matchingID]
+	if current.ID == "" {
+		current = Device{ID: matchingID, Name: strings.TrimSuffix(host, "."), Connection: "wifi", Paired: true, Source: "bonjour"}
+	}
+	if current.Connection != "usb" {
+		current.Address = host
+		current.Port = port
+		current.Connection = "wifi"
+		current.Source = "bonjour"
+	} else {
+		current.Source = "usbmux+bonjour"
+	}
+	current.Bridge = true
+	current.Paired = true
+	merged[matchingID] = current
+}
+
+func normalizeDeviceName(value string) string {
+	value = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(value)), ".")
+	value = strings.TrimSuffix(value, ".local")
+	var normalized strings.Builder
+	for _, character := range value {
+		if unicode.IsLetter(character) || unicode.IsDigit(character) {
+			normalized.WriteRune(character)
+		}
+	}
+	return normalized.String()
 }

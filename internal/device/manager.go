@@ -77,6 +77,19 @@ func (m *Manager) Execute(ctx context.Context, request registry.Request) (regist
 	if err != nil {
 		return registry.Result{}, protocol.NewError(protocol.ErrAmbiguous, err.Error(), map[string]any{"candidates": devices})
 	}
+	if request.Command == "screen_capture" {
+		params := cloneParams(request.Params)
+		params["device"] = selected.ID
+		client, clientErr := m.client(ctx, selected)
+		if clientErr == nil {
+			return m.screenCapture(ctx, client, params)
+		}
+		if result, fallbackErr := m.pymobiledeviceScreenshot(ctx, selected.ID); fallbackErr == nil {
+			return result, nil
+		} else {
+			return registry.Result{}, fmt.Errorf("%w; screenshot fallback failed: %v", clientErr, fallbackErr)
+		}
+	}
 	if request.Command == "tweak_cycle" {
 		return m.tweakCycle(ctx, selected, request)
 	}
@@ -115,9 +128,6 @@ func (m *Manager) Execute(ctx context.Context, request registry.Request) (regist
 			return registry.Result{}, callErr
 		}
 		return m.responseResult(request.Command, response)
-	}
-	if request.Command == "screen_capture" {
-		return m.screenCapture(ctx, client, params)
 	}
 	if request.Command == "file_transfer" {
 		return m.fileTransfer(ctx, client, params)

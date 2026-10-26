@@ -6,9 +6,9 @@
 #import <unistd.h>
 #import "BridgeProtocol.h"
 #import "DisplayControl.h"
+#import "InputInjector.h"
 
 extern NSData *JBP1lotCapturePNG(void);
-extern BOOL JBP1lotInjectAction(NSDictionary *params);
 
 static NSString *JBP1lotFrameIdentifier = @"";
 static int JBP1lotSocket = -1;
@@ -39,10 +39,11 @@ static NSDictionary *JBP1lotAgentResponse(NSDictionary *request) {
             return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"invalid_frame", @"accessibility node frame expired") };
         }
         CFTimeInterval actionStart = CFAbsoluteTimeGetCurrent();
-        BOOL performed = JBP1lotInjectAction(params);
+        NSString *failureReason = nil;
+        BOOL performed = JBP1lotInjectAction(params, &failureReason);
         NSNumber *actionDuration = @((CFAbsoluteTimeGetCurrent() - actionStart) * 1000.0);
         if (!performed) {
-            return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"backend_error", @"UI action unavailable") };
+            return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"backend_error", failureReason ?: @"UI action unavailable") };
         }
         return @{ @"status": @"ok", @"payload": @{ @"performed": @YES, @"displayEnabled": @(JBP1lotDisplayIsEnabled()), @"actionDurationMs": actionDuration } };
     }

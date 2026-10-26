@@ -9,5 +9,7 @@ nodes are unavailable. `ui_action` supports HID taps, long presses, drags,
 swipes, multitouch, Unicode text, hardware buttons, display control, and system
 gestures. Use `screen_off` or `screen_on` to darken or restore the display
 without locking the device. The same actions are available through
-`device_action`. A button action can use `repeat` and `intervalMs` for a
-hardware-button sequence. Protected display layers are reported as unavailable.
+`device_action`. Buttons `home`, `lock`, and `unlock` are real HID presses, and
+a press SpringBoard does not act on returns an error. A button action can use
+`repeat` and `intervalMs` for a hardware-button sequence. Protected display
+layers are reported as unavailable.

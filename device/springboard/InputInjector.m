@@ -3,9 +3,11 @@
 #import <dlfcn.h>
 #import <mach/mach_time.h>
 #import <objc/message.h>
+#import <stdatomic.h>
 #import <stdint.h>
 #import <unistd.h>
 #import "DisplayControl.h"
+#import "InputInjector.h"
 
 typedef void *IOHIDEventSystemClientRef;
 typedef void *IOHIDEventRef;
@@ -31,6 +33,12 @@ typedef struct {
     ReleaseFn releaseValue;
     IOHIDEventSystemClientRef client;
 } JBP1lotHIDFunctions;
+
+static const uint32_t JBP1lotKeyboardUsagePage = 0x07u;
+static const uint32_t JBP1lotConsumerUsagePage = 0x0Cu;
+static const uint32_t JBP1lotConsumerPowerUsage = 0x30u;
+static const uint32_t JBP1lotConsumerMenuUsage = 0x40u;
+static const uint64_t JBP1lotHIDSenderID = 0x8000000817319375ULL;
 
 static JBP1lotHIDFunctions JBP1lotHIDLoadFunctions(void) {
     static JBP1lotHIDFunctions functions;
@@ -114,19 +122,23 @@ static BOOL JBP1lotKeyboardUsage(unichar character, uint32_t *usage, BOOL *shift
     return NO;
 }
 
-static BOOL JBP1lotHIDKeyboardEvent(uint32_t usage, BOOL down) {
+static BOOL JBP1lotHIDKeyEvent(uint32_t usagePage, uint32_t usage, BOOL down) {
     JBP1lotHIDFunctions functions = JBP1lotHIDLoadFunctions();
     if (!functions.client || !functions.createKeyboardEvent || !functions.dispatchEvent)
         return NO;
-    IOHIDEventRef event = functions.createKeyboardEvent(kCFAllocatorDefault, mach_absolute_time(), 0x07u, usage, down, 0);
+    IOHIDEventRef event = functions.createKeyboardEvent(kCFAllocatorDefault, mach_absolute_time(), usagePage, usage, down, 0);
     if (!event)
         return NO;
     if (functions.setSenderID)
-        functions.setSenderID(event, 0x8000000817319375ULL);
+        functions.setSenderID(event, JBP1lotHIDSenderID);
     functions.dispatchEvent(functions.client, event);
     if (functions.releaseValue)
         functions.releaseValue(event);
     return YES;
+}
+
+static BOOL JBP1lotHIDKeyboardEvent(uint32_t usage, BOOL down) {
+    return JBP1lotHIDKeyEvent(JBP1lotKeyboardUsagePage, usage, down);
 }
 
 static BOOL JBP1lotInsertTextWithKeyboardEvents(NSString *text) {
@@ -333,7 +345,7 @@ static BOOL JBP1lotHIDPoint(CGFloat x, CGFloat y, BOOL down) {
         functions.setIntegerValue(parent, (11u << 16) + 25, 1);
     }
     if (functions.setSenderID) {
-        functions.setSenderID(parent, 0x8000000817319375ULL);
+        functions.setSenderID(parent, JBP1lotHIDSenderID);
     }
     functions.appendEvent(parent, child, 0);
     functions.dispatchEvent(functions.client, parent);
@@ -484,101 +496,307 @@ static void JBP1lotDismissCoverSheet(void) {
         ((void (*)(id, SEL, BOOL, BOOL, id))objc_msgSend)(presentation, dismissSelector, NO, NO, nil);
 }
 
-static BOOL JBP1lotUnlockDevice(void) {
-    __block BOOL performed = NO;
-    void (^unlockBlock)(void) = ^{
-        JBP1lotWakeDisplay();
+typedef NS_ENUM(NSInteger, JBP1lotHardwareButton) {
+    JBP1lotHardwareButtonUnsupported,
+    JBP1lotHardwareButtonHome,
+    JBP1lotHardwareButtonLock,
+    JBP1lotHardwareButtonUnlock,
+};
 
-        Class awayControllerClass = NSClassFromString(@"SBAwayController");
-        id awayController = awayControllerClass && [awayControllerClass respondsToSelector:@selector(sharedAwayController)]
-                                ? ((id (*)(id, SEL))objc_msgSend)((id)awayControllerClass, @selector(sharedAwayController))
-                                : nil;
-        if ([awayController respondsToSelector:@selector(isLocked)] &&
-            ((BOOL (*)(id, SEL))objc_msgSend)(awayController, @selector(isLocked))) {
-            if ([awayController respondsToSelector:@selector(attemptUnlock)]) {
-                ((void (*)(id, SEL))objc_msgSend)(awayController, @selector(attemptUnlock));
-                performed = YES;
-            }
-            if ([awayController respondsToSelector:@selector(unlockWithSound:)]) {
-                ((void (*)(id, SEL, BOOL))objc_msgSend)(awayController, @selector(unlockWithSound:), NO);
-                performed = YES;
-            }
-        }
+static atomic_int JBP1lotSyntheticButtonPressDepth = 0;
 
-        Class lockManagerClass = NSClassFromString(@"SBLockScreenManager");
-        SEL sharedSelector = @selector(sharedInstance);
-        id lockManager = lockManagerClass && [lockManagerClass respondsToSelector:sharedSelector]
-                          ? ((id (*)(id, SEL))objc_msgSend)((id)lockManagerClass, sharedSelector)
-                          : nil;
-        SEL unlockSelector = @selector(unlockUIFromSource:withOptions:);
-        if ([lockManager respondsToSelector:unlockSelector]) {
-            NSDictionary *options = @{
-                @"SBUIUnlockOptionsStartFadeInAnimation": @YES,
-                @"SBUIUnlockOptionsTurnOnScreenFirstKey": @YES
-            };
-            ((void (*)(id, SEL, NSUInteger, NSDictionary *))objc_msgSend)(lockManager, unlockSelector, 0, options);
-            performed = YES;
-        }
-        JBP1lotDismissCoverSheet();
-    };
+BOOL JBP1lotSyntheticButtonPressActive(void) {
+    return atomic_load(&JBP1lotSyntheticButtonPressDepth) > 0;
+}
+
+static void JBP1lotRunOnMain(dispatch_block_t block) {
     if ([NSThread isMainThread])
-        unlockBlock();
+        block();
     else
-        dispatch_sync(dispatch_get_main_queue(), unlockBlock);
-    return performed;
+        dispatch_sync(dispatch_get_main_queue(), block);
 }
 
-static BOOL JBP1lotPressHardwareButton(NSString *button) {
-    NSString *normalizedButton = [button.lowercaseString stringByReplacingOccurrencesOfString:@"-" withString:@"_"];
-    if ([normalizedButton isEqualToString:@"unlock"] || [normalizedButton isEqualToString:@"wake"])
-        return JBP1lotUnlockDevice();
-    __block BOOL performed = NO;
-    void (^pressBlock)(void) = ^{
-        UIApplication *application = UIApplication.sharedApplication;
-        if (JBP1lotDisplayIsEnabled())
-            JBP1lotWakeDisplay();
+static id JBP1lotSharedInstance(NSString *className) {
+    Class instanceClass = NSClassFromString(className);
+    return instanceClass && [instanceClass respondsToSelector:@selector(sharedInstance)]
+               ? ((id (*)(id, SEL))objc_msgSend)((id)instanceClass, @selector(sharedInstance))
+               : nil;
+}
 
-        Class lockManagerClass = NSClassFromString(@"SBLockScreenManager");
-        id lockManager = lockManagerClass && [lockManagerClass respondsToSelector:@selector(sharedInstance)]
-                             ? ((id (*)(id, SEL))objc_msgSend)((id)lockManagerClass, @selector(sharedInstance))
-                             : nil;
-        if ([normalizedButton isEqualToString:@"home"] && [lockManager respondsToSelector:@selector(isUILocked)] &&
-            ((BOOL (*)(id, SEL))objc_msgSend)(lockManager, @selector(isUILocked)))
-            performed = JBP1lotUnlockDevice();
+static id JBP1lotObjectForSelector(id object, NSString *selectorName) {
+    SEL selector = NSSelectorFromString(selectorName);
+    return [object respondsToSelector:selector] ? ((id (*)(id, SEL))objc_msgSend)(object, selector) : nil;
+}
 
-        Class controllerClass = NSClassFromString(@"SBUIController");
-        SEL sharedSelector = @selector(sharedInstance);
-        id controller = controllerClass && [controllerClass respondsToSelector:sharedSelector]
-                            ? ((id (*)(id, SEL))objc_msgSend)((id)controllerClass, sharedSelector)
-                            : nil;
-        BOOL stillLocked = [lockManager respondsToSelector:@selector(isUILocked)] &&
-                           ((BOOL (*)(id, SEL))objc_msgSend)(lockManager, @selector(isUILocked));
-        SEL homeSelector = @selector(handleHomeButtonSinglePressUp);
-        SEL simulateHomeSelector = NSSelectorFromString(@"_simulateHomeButtonPress");
-        if ([normalizedButton isEqualToString:@"home"] && !stillLocked && [application respondsToSelector:simulateHomeSelector]) {
-            ((void (*)(id, SEL))objc_msgSend)(application, simulateHomeSelector);
-            performed = YES;
-        } else if ([normalizedButton isEqualToString:@"home"] && !stillLocked && [controller respondsToSelector:homeSelector]) {
-            ((void (*)(id, SEL))objc_msgSend)(controller, homeSelector);
-            performed = YES;
+static BOOL JBP1lotBoolForSelector(id object, NSString *selectorName, BOOL fallback) {
+    SEL selector = NSSelectorFromString(selectorName);
+    return [object respondsToSelector:selector] ? ((BOOL (*)(id, SEL))objc_msgSend)(object, selector) : fallback;
+}
+
+@interface JBP1lotSpringBoardState : NSObject
+@property (nonatomic) BOOL uiLocked;
+@property (nonatomic) BOOL screenOn;
+@property (nonatomic) BOOL showingHomeScreen;
+@property (nonatomic, copy) NSString *frontmostApplication;
+- (BOOL)isUnlockedAtHomeScreen;
+- (BOOL)isUnlockedAndAwake;
+- (BOOL)differsFrom:(JBP1lotSpringBoardState *)other;
+@end
+
+@implementation JBP1lotSpringBoardState
+
+- (BOOL)isUnlockedAtHomeScreen {
+    return !self.uiLocked && self.showingHomeScreen && self.frontmostApplication == nil;
+}
+
+- (BOOL)isUnlockedAndAwake {
+    return !self.uiLocked && self.screenOn;
+}
+
+- (BOOL)differsFrom:(JBP1lotSpringBoardState *)other {
+    BOOL sameFrontmost = self.frontmostApplication == other.frontmostApplication ||
+                         [self.frontmostApplication isEqualToString:other.frontmostApplication];
+    return self.uiLocked != other.uiLocked || self.screenOn != other.screenOn ||
+           self.showingHomeScreen != other.showingHomeScreen || !sameFrontmost;
+}
+
+@end
+
+static JBP1lotSpringBoardState *JBP1lotReadSpringBoardState(void) {
+    JBP1lotSpringBoardState *state = [JBP1lotSpringBoardState new];
+    JBP1lotRunOnMain(^{
+        @try {
+            UIApplication *application = UIApplication.sharedApplication;
+            state.uiLocked = JBP1lotBoolForSelector(JBP1lotSharedInstance(@"SBLockScreenManager"), @"isUILocked", NO);
+            state.screenOn = JBP1lotBoolForSelector(JBP1lotSharedInstance(@"SBBacklightController"), @"screenIsOn", YES);
+            state.showingHomeScreen = JBP1lotBoolForSelector(application, @"isShowingHomescreen", NO);
+            id frontmost = JBP1lotObjectForSelector(application, @"_accessibilityFrontMostApplication");
+            id bundleIdentifier = JBP1lotObjectForSelector(frontmost, @"bundleIdentifier");
+            state.frontmostApplication = [bundleIdentifier isKindOfClass:[NSString class]] ? bundleIdentifier : nil;
+        } @catch (__unused NSException *exception) {
         }
+    });
+    return state;
+}
 
-        if ([normalizedButton isEqualToString:@"home"])
-            JBP1lotRegisterHomeButtonPress();
-
-        if (!performed && [normalizedButton isEqualToString:@"home"])
-            performed = JBP1lotUnlockDevice();
-    };
-
-    if ([NSThread isMainThread]) {
-        pressBlock();
-    } else {
-        dispatch_sync(dispatch_get_main_queue(), pressBlock);
+static JBP1lotSpringBoardState *JBP1lotAwaitSpringBoardState(NSTimeInterval timeout, BOOL (^condition)(JBP1lotSpringBoardState *state)) {
+    CFAbsoluteTime deadline = CFAbsoluteTimeGetCurrent() + timeout;
+    JBP1lotSpringBoardState *state = JBP1lotReadSpringBoardState();
+    while (!condition(state) && CFAbsoluteTimeGetCurrent() < deadline) {
+        usleep(50000);
+        state = JBP1lotReadSpringBoardState();
     }
+    return state;
+}
+
+static BOOL JBP1lotHardwareButtonIsDown(JBP1lotHardwareButton button) {
+    __block BOOL down = NO;
+    NSString *accessor = button == JBP1lotHardwareButtonLock ? @"lockHardwareButton" : @"homeHardwareButton";
+    JBP1lotRunOnMain(^{
+        @try {
+            id hardwareButton = JBP1lotObjectForSelector(UIApplication.sharedApplication, accessor);
+            down = JBP1lotBoolForSelector(hardwareButton, @"isButtonDown", NO);
+        } @catch (__unused NSException *exception) {
+            down = NO;
+        }
+    });
+    return down;
+}
+
+static BOOL JBP1lotHIDButtonPress(JBP1lotHardwareButton button, BOOL *observedBySpringBoard) {
+    uint32_t usage = button == JBP1lotHardwareButtonLock ? JBP1lotConsumerPowerUsage : JBP1lotConsumerMenuUsage;
+    *observedBySpringBoard = NO;
+    if (!JBP1lotHIDKeyEvent(JBP1lotConsumerUsagePage, usage, YES))
+        return NO;
+    CFAbsoluteTime pressStart = CFAbsoluteTimeGetCurrent();
+    while (!*observedBySpringBoard && CFAbsoluteTimeGetCurrent() - pressStart < 0.15) {
+        usleep(10000);
+        *observedBySpringBoard = JBP1lotHardwareButtonIsDown(button);
+    }
+    NSTimeInterval held = CFAbsoluteTimeGetCurrent() - pressStart;
+    if (held < 0.06)
+        usleep((useconds_t)((0.06 - held) * 1000000.0));
+    return JBP1lotHIDKeyEvent(JBP1lotConsumerUsagePage, usage, NO);
+}
+
+static void JBP1lotRequestUIUnlock(void) {
+    JBP1lotRunOnMain(^{
+        @try {
+            JBP1lotWakeDisplay();
+            id lockManager = JBP1lotSharedInstance(@"SBLockScreenManager");
+            SEL unlockSelector = @selector(unlockUIFromSource:withOptions:);
+            if ([lockManager respondsToSelector:unlockSelector]) {
+                NSDictionary *options = @{
+                    @"SBUIUnlockOptionsStartFadeInAnimation": @YES,
+                    @"SBUIUnlockOptionsTurnOnScreenFirstKey": @YES
+                };
+                ((void (*)(id, SEL, NSUInteger, NSDictionary *))objc_msgSend)(lockManager, unlockSelector, 0, options);
+            }
+            JBP1lotDismissCoverSheet();
+        } @catch (__unused NSException *exception) {
+        }
+    });
+}
+
+static BOOL JBP1lotRequestSpringBoardButtonSimulation(NSString *selectorName, BOOL takesCompletion) {
+    __block BOOL requested = NO;
+    JBP1lotRunOnMain(^{
+        UIApplication *application = UIApplication.sharedApplication;
+        SEL selector = NSSelectorFromString(selectorName);
+        if (![application respondsToSelector:selector])
+            return;
+        @try {
+            if (takesCompletion)
+                ((void (*)(id, SEL, dispatch_block_t))objc_msgSend)(application, selector, ^{});
+            else
+                ((void (*)(id, SEL))objc_msgSend)(application, selector);
+            requested = YES;
+        } @catch (__unused NSException *exception) {
+            requested = NO;
+        }
+    });
+    return requested;
+}
+
+static void JBP1lotRecordHomeButtonPress(void) {
+    JBP1lotRunOnMain(^{
+        JBP1lotRegisterHomeButtonPress();
+    });
+}
+
+static BOOL JBP1lotUnlockDevice(NSString **failureReason) {
+    BOOL (^unlocked)(JBP1lotSpringBoardState *) = ^BOOL(JBP1lotSpringBoardState *state) {
+        return [state isUnlockedAndAwake];
+    };
+    JBP1lotSpringBoardState *state = JBP1lotReadSpringBoardState();
+    for (NSUInteger attempt = 0; attempt < 3 && !unlocked(state); attempt++) {
+        BOOL observed = NO;
+        if (!state.uiLocked)
+            JBP1lotRunOnMain(^{
+                JBP1lotWakeDisplay();
+            });
+        else if (attempt == 1)
+            JBP1lotRequestUIUnlock();
+        else if (!JBP1lotHIDButtonPress(JBP1lotHardwareButtonHome, &observed))
+            JBP1lotRequestUIUnlock();
+        state = JBP1lotAwaitSpringBoardState(1.2, unlocked);
+    }
+    if (unlocked(state))
+        return YES;
+    *failureReason = state.uiLocked ? @"device is still locked; a passcode may be required" : @"display did not wake";
+    return NO;
+}
+
+static BOOL JBP1lotPressHome(NSString **failureReason) {
+    JBP1lotSpringBoardState *before = JBP1lotReadSpringBoardState();
+    if (before.uiLocked && !JBP1lotUnlockDevice(failureReason))
+        return NO;
+    JBP1lotSpringBoardState *current = before.uiLocked ? JBP1lotReadSpringBoardState() : before;
+    if (before.uiLocked && [current isUnlockedAtHomeScreen])
+        return YES;
+
+    BOOL observed = NO;
+    if (!JBP1lotHIDButtonPress(JBP1lotHardwareButtonHome, &observed)) {
+        *failureReason = @"home button HID event could not be dispatched";
+        return NO;
+    }
+    JBP1lotRecordHomeButtonPress();
+    if ([current isUnlockedAtHomeScreen])
+        return YES;
+
+    BOOL (^atHomeScreen)(JBP1lotSpringBoardState *) = ^BOOL(JBP1lotSpringBoardState *state) {
+        return [state isUnlockedAtHomeScreen];
+    };
+    if ([JBP1lotAwaitSpringBoardState(1.5, atHomeScreen) isUnlockedAtHomeScreen])
+        return YES;
+    if (JBP1lotRequestSpringBoardButtonSimulation(@"_simulateHomeButtonPressWithCompletion:", YES) &&
+        [JBP1lotAwaitSpringBoardState(1.5, atHomeScreen) isUnlockedAtHomeScreen])
+        return YES;
+    *failureReason = observed ? @"home button press did not reach the home screen"
+                              : @"home button press was not delivered to SpringBoard";
+    return NO;
+}
+
+static BOOL JBP1lotPressLock(NSString **failureReason) {
+    JBP1lotSpringBoardState *before = JBP1lotReadSpringBoardState();
+    BOOL (^lockOrDisplayChanged)(JBP1lotSpringBoardState *) = ^BOOL(JBP1lotSpringBoardState *state) {
+        return state.uiLocked != before.uiLocked || state.screenOn != before.screenOn;
+    };
+    BOOL observed = NO;
+    if (!JBP1lotHIDButtonPress(JBP1lotHardwareButtonLock, &observed)) {
+        *failureReason = @"lock button HID event could not be dispatched";
+        return NO;
+    }
+    if (lockOrDisplayChanged(JBP1lotAwaitSpringBoardState(1.5, lockOrDisplayChanged)))
+        return YES;
+    if (JBP1lotRequestSpringBoardButtonSimulation(@"_simulateLockButtonPress", NO) &&
+        lockOrDisplayChanged(JBP1lotAwaitSpringBoardState(1.5, lockOrDisplayChanged)))
+        return YES;
+    *failureReason = observed ? @"lock button press did not change the lock or display state"
+                              : @"lock button press was not delivered to SpringBoard";
+    return NO;
+}
+
+static BOOL JBP1lotPressButtonSequence(JBP1lotHardwareButton button, NSUInteger repeat, NSUInteger intervalMs, NSString **failureReason) {
+    JBP1lotSpringBoardState *before = JBP1lotReadSpringBoardState();
+    NSUInteger observedPresses = 0;
+    for (NSUInteger index = 0; index < repeat; index++) {
+        BOOL observed = NO;
+        if (!JBP1lotHIDButtonPress(button, &observed)) {
+            *failureReason = @"hardware button HID event could not be dispatched";
+            return NO;
+        }
+        if (observed)
+            observedPresses += 1;
+        if (button == JBP1lotHardwareButtonHome)
+            JBP1lotRecordHomeButtonPress();
+        if (index + 1 < repeat)
+            usleep((useconds_t)intervalMs * 1000);
+    }
+    if (observedPresses == repeat)
+        return YES;
+    BOOL (^changed)(JBP1lotSpringBoardState *) = ^BOOL(JBP1lotSpringBoardState *state) {
+        return [state differsFrom:before];
+    };
+    if (changed(JBP1lotAwaitSpringBoardState(1.0, changed)))
+        return YES;
+    *failureReason = @"hardware button sequence had no observable effect";
+    return NO;
+}
+
+static JBP1lotHardwareButton JBP1lotHardwareButtonNamed(NSString *name) {
+    NSString *normalized = [name.lowercaseString stringByReplacingOccurrencesOfString:@"-" withString:@"_"];
+    if ([@[@"home", @"menu"] containsObject:normalized])
+        return JBP1lotHardwareButtonHome;
+    if ([@[@"lock", @"power", @"sleep", @"side"] containsObject:normalized])
+        return JBP1lotHardwareButtonLock;
+    if ([@[@"unlock", @"wake"] containsObject:normalized])
+        return JBP1lotHardwareButtonUnlock;
+    return JBP1lotHardwareButtonUnsupported;
+}
+
+static BOOL JBP1lotPerformHardwareButton(JBP1lotHardwareButton button, NSUInteger repeat, NSUInteger intervalMs, NSString **failureReason) {
+    if (button == JBP1lotHardwareButtonUnlock)
+        return JBP1lotUnlockDevice(failureReason);
+    if (repeat > 1)
+        return JBP1lotPressButtonSequence(button, repeat, intervalMs, failureReason);
+    return button == JBP1lotHardwareButtonHome ? JBP1lotPressHome(failureReason) : JBP1lotPressLock(failureReason);
+}
+
+static BOOL JBP1lotPressHardwareButton(NSString *name, NSUInteger repeat, NSUInteger intervalMs, NSString **failureReason) {
+    JBP1lotHardwareButton button = JBP1lotHardwareButtonNamed(name);
+    if (button == JBP1lotHardwareButtonUnsupported) {
+        *failureReason = [NSString stringWithFormat:@"unsupported hardware button \"%@\"", name];
+        return NO;
+    }
+    atomic_fetch_add(&JBP1lotSyntheticButtonPressDepth, 1);
+    BOOL performed = JBP1lotPerformHardwareButton(button, repeat, intervalMs, failureReason);
+    usleep(150000);
+    atomic_fetch_sub(&JBP1lotSyntheticButtonPressDepth, 1);
     return performed;
 }
 
-BOOL JBP1lotInjectAction(NSDictionary *params) {
+BOOL JBP1lotInjectAction(NSDictionary *params, NSString **failureReason) {
     NSString *action = [params[@"action"] isKindOfClass:[NSString class]] ? [params[@"action"] lowercaseString] : @"";
     if ([action isEqualToString:@"screen_off"] || [action isEqualToString:@"display_off"] || [action isEqualToString:@"dark_on"]) {
         return JBP1lotSetDisplayEnabled(NO);
@@ -590,13 +808,8 @@ BOOL JBP1lotInjectAction(NSDictionary *params) {
         NSString *button = [params[@"button"] isKindOfClass:[NSString class]] ? params[@"button"] : @"";
         NSUInteger repeat = MAX(1, MIN([params[@"repeat"] unsignedIntegerValue], 5));
         NSUInteger interval = MAX(40, MIN([params[@"intervalMs"] unsignedIntegerValue] ?: 180, 1000));
-        BOOL performed = YES;
-        for (NSUInteger index = 0; index < repeat; index++) {
-            performed = JBP1lotPressHardwareButton(button) && performed;
-            if (index + 1 < repeat)
-                usleep((useconds_t)interval * 1000);
-        }
-        if ([button.lowercaseString isEqualToString:@"home"] && repeat >= 3)
+        BOOL performed = JBP1lotPressHardwareButton(button, repeat, interval, failureReason);
+        if (performed && [button.lowercaseString isEqualToString:@"home"] && repeat >= 3)
             usleep(450000);
         return performed;
     }

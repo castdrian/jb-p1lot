@@ -1,20 +1,14 @@
 #import <Foundation/Foundation.h>
 #import "BridgeProtocol.h"
 #import "DisplayControl.h"
-
-%hook SBUIController
-
-- (void)handleHomeButtonSinglePressUp {
-    %orig;
-}
-
-%end
+#import "InputInjector.h"
 
 %hook SBHomeHardwareButton
 
 - (void)initialButtonUp:(id)gestureRecognizer {
     %orig;
-    JBP1lotRegisterHomeButtonPress();
+    if (!JBP1lotSyntheticButtonPressActive())
+        JBP1lotRegisterHomeButtonPress();
 }
 
 %end

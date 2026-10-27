@@ -146,9 +146,25 @@ static NSDictionary *JBP1lotPackageRequest(NSDictionary *params) {
     return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"invalid_frame", @"unknown package action") };
 }
 
+static NSDictionary *JBP1lotWakeResponse(void) {
+    NSDictionary *response = nil;
+    NSDictionary *request = @{ @"id": @0, @"method": @"ui_action", @"payload": @{ @"action": @"wake", @"source": @"daemon" } };
+    if (!JBP1lotForwardToAgent(request, &response) || [response[@"status"] isEqual:@"error"])
+        return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"backend_error", @"SpringBoard did not wake") };
+    JBP1lotRefreshBlackout();
+    NSMutableDictionary *payload = [JBP1lotDisplayStatus() mutableCopy];
+    payload[@"performed"] = @YES;
+    payload[@"awake"] = @YES;
+    payload[@"displayEnabled"] = @((BOOL)![payload[@"blackout"] boolValue]);
+    payload[@"locked"] = @NO;
+    return @{ @"status": @"ok", @"payload": payload };
+}
+
 static NSDictionary *JBP1lotDisplayActionResponse(NSString *action) {
+    if ([@[@"screen_on", @"display_on", @"wake"] containsObject:action])
+        return JBP1lotWakeResponse();
     BOOL off = [@[@"screen_off", @"display_off", @"dark_on", @"blackout_on"] containsObject:action];
-    BOOL on = [@[@"screen_on", @"display_on", @"dark_off", @"blackout_off"] containsObject:action];
+    BOOL on = [@[@"dark_off", @"blackout_off"] containsObject:action];
     BOOL toggle = [action isEqualToString:@"blackout_toggle"];
     if (!off && !on && !toggle) return nil;
     BOOL blackout = toggle ? !JBP1lotBlackoutEnabled() : off;

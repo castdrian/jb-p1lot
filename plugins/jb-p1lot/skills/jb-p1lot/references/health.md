@@ -20,5 +20,6 @@ the package or stopping the daemon releases every power control.
 The display is blacked out by default: the panel is powered down without
 locking the device, so taps, accessibility, and `screen_capture` keep working.
 A physical triple press of the home button toggles it, and `ui_action` or
-`device_action` with `screen_on`, `screen_off`, or `blackout_toggle` sets it
-remotely. The choice persists across daemon restarts.
+`device_action` with `blackout_off`, `blackout_on` (or `screen_off`), or
+`blackout_toggle` sets it remotely. `screen_on` only wakes SpringBoard and
+leaves the blackout as it is. The choice persists across daemon restarts.

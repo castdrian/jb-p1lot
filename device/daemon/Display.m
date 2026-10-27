@@ -120,6 +120,13 @@ BOOL JBP1lotSetBlackout(BOOL enabled, NSString *source) {
     return performed;
 }
 
+void JBP1lotRefreshBlackout(void) {
+    dispatch_sync(JBP1lotDisplayQueue, ^{
+        if (JBP1lotBlackout)
+            JBP1lotApplyBlackout();
+    });
+}
+
 BOOL JBP1lotBlackoutEnabled(void) {
     __block BOOL enabled = NO;
     dispatch_sync(JBP1lotDisplayQueue, ^{

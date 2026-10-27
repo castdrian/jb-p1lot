@@ -14,10 +14,12 @@ Use `screen_capture` to verify visual state and `ui_action` with normalized
 coordinates or screen points when semantic nodes are unavailable. The visual
 path remains independent of XCTest/WDA and works for SpringBoard surfaces.
 Use HID actions for taps, long presses, drags, swipes, multitouch, Unicode
-text, hardware buttons, display control, and system gestures. Use `screen_off`
-or `screen_on` to black out or restore the display without locking the device;
-the same actions are available through `device_action`, and the display is
-blacked out by default (see [health.md](health.md)). Pass `--unlock true` to
+text, hardware buttons, display control, and system gestures. `screen_on`
+(or `wake`) wakes SpringBoard without changing the blackout, so the panel stays
+dark while taps and captures work; `blackout_off` and `blackout_on` (or
+`screen_off`) change the blackout itself, and persist. The same actions are
+available through `device_action`, and the display is blacked out by default
+(see [health.md](health.md)). Pass `--unlock true` to
 wake and unlock the device before a tap, swipe, or text action. Swipes and
 drags take `--points`, `--durationMs`, and `--easing linear|ease_in|ease_out|ease_in_out`
 and are sampled every 8 ms along the whole path. Buttons are `home`, `lock`,

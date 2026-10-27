@@ -664,12 +664,6 @@ static BOOL JBP1lotRequestSpringBoardButtonSimulation(NSString *selectorName, BO
     return requested;
 }
 
-static void JBP1lotRecordHomeButtonPress(void) {
-    JBP1lotRunOnMain(^{
-        JBP1lotRegisterHomeButtonPress();
-    });
-}
-
 static BOOL JBP1lotUnlockDevice(NSString **failureReason) {
     BOOL (^unlocked)(JBP1lotSpringBoardState *) = ^BOOL(JBP1lotSpringBoardState *state) {
         return [state isUnlockedAndAwake];
@@ -706,7 +700,6 @@ static BOOL JBP1lotPressHome(NSString **failureReason) {
         *failureReason = @"home button HID event could not be dispatched";
         return NO;
     }
-    JBP1lotRecordHomeButtonPress();
     if ([current isUnlockedAtHomeScreen])
         return YES;
 
@@ -755,8 +748,11 @@ static BOOL JBP1lotPressButtonSequence(JBP1lotHardwareButton button, NSUInteger 
         if (observed)
             observedPresses += 1;
         if (button == JBP1lotHardwareButtonHome)
-            JBP1lotRecordHomeButtonPress();
-        if (index + 1 < repeat)
+            JBP1lotRunOnMain(^{
+                JBP1lotRegisterHomeButtonPress();
+            });
+        if (button == JBP1lotHardwareButtonHome)
+                if (index + 1 < repeat)
             usleep((useconds_t)intervalMs * 1000);
     }
     if (observedPresses == repeat)
@@ -906,6 +902,12 @@ BOOL JBP1lotInjectAction(NSDictionary *params, NSString **failureReason) {
     }
     if ([action isEqualToString:@"screen_on"] || [action isEqualToString:@"display_on"] || [action isEqualToString:@"dark_off"]) {
         return JBP1lotSetDisplayEnabled(YES);
+    }
+    if ([action isEqualToString:@"wake"]) {
+        JBP1lotRunOnMain(^{
+            JBP1lotWakeDisplay();
+        });
+        return YES;
     }
     if ([action isEqualToString:@"button"] || [action isEqualToString:@"hardware_button"]) {
         NSString *button = [params[@"button"] isKindOfClass:[NSString class]] ? params[@"button"] : @"";

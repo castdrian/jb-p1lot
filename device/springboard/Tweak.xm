@@ -1,20 +1,28 @@
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 #import "BridgeProtocol.h"
 #import "DisplayControl.h"
 #import "InputInjector.h"
 
-%hook SBHomeHardwareButton
+static NSInteger const JBP1lotHomePressType = 101;
 
-- (void)initialButtonUp:(id)gestureRecognizer {
-    %orig;
-    if (!JBP1lotSyntheticButtonPressActive())
-        JBP1lotRegisterHomeButtonPress();
+static BOOL JBP1lotEndsHomePress(UIPressesEvent *event) {
+    if (![event isKindOfClass:[UIPressesEvent class]])
+        return NO;
+    for (UIPress *press in event.allPresses) {
+        if ((NSInteger)press.type == JBP1lotHomePressType && press.phase == UIPressPhaseEnded)
+            return YES;
+    }
+    return NO;
 }
 
-- (void)triplePressUp:(id)gestureRecognizer {
-    %orig;
-    if (!JBP1lotSyntheticButtonPressActive())
-        JBP1lotRegisterHomeTriplePress();
+%hook SpringBoard
+
+- (BOOL)_handlePhysicalButtonEvent:(UIPressesEvent *)event {
+    BOOL handled = %orig;
+    if (JBP1lotEndsHomePress(event) && !JBP1lotSyntheticButtonPressActive())
+        JBP1lotRegisterHomeButtonPress();
+    return handled;
 }
 
 %end

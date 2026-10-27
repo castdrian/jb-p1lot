@@ -5,4 +5,5 @@ rm -f /var/jb/Library/MobileSubstrate/DynamicLibraries/JBP1lot.dylib
 rm -f /var/jb/Library/MobileSubstrate/DynamicLibraries/jbp1lot.plist
 rm -f /var/jb/Library/MobileSubstrate/DynamicLibraries/jbp1lot.dylib
 rm -f /var/jb/usr/libexec/jbp1lot-daemon
+nohup sh -c 'sleep 2; /var/jb/usr/bin/launchctl kickstart -k system/dev.adrian.jb-p1lot.daemon' >/dev/null 2>&1 &
 exit 0

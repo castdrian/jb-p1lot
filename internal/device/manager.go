@@ -535,7 +535,7 @@ func normalizeAction(params map[string]any) string {
 
 func isDisplayAction(action string) bool {
 	switch action {
-	case "screen_off", "display_off", "dark_on", "screen_on", "display_on", "dark_off":
+	case "screen_off", "display_off", "dark_on", "screen_on", "display_on", "dark_off", "wake", "blackout_on", "blackout_off", "blackout_toggle":
 		return true
 	default:
 		return false

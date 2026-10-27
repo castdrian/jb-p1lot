@@ -7,7 +7,13 @@ extern "C" {
 BOOL JBP1lotSetDisplayEnabled(BOOL enabled);
 BOOL JBP1lotDisplayIsEnabled(void);
 void JBP1lotWakeDisplay(void);
-void JBP1lotRegisterHomeButtonPress(void);
+typedef NS_ENUM(NSInteger, JBP1lotPressType) {
+    JBP1lotPressTypeHome = 101,
+    JBP1lotPressTypeVolumeUp = 102,
+    JBP1lotPressTypeVolumeDown = 103,
+};
+
+void JBP1lotRegisterButtonPress(NSInteger type);
 
 #ifdef __cplusplus
 }

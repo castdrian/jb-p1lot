@@ -22,7 +22,7 @@ available through `device_action`, and the display is blacked out by default
 (see [health.md](health.md)). Pass `--unlock true` to
 wake and unlock the device before a tap, swipe, or text action. Swipes and
 drags take `--points`, `--durationMs`, and `--easing linear|ease_in|ease_out|ease_in_out`
-and are sampled every 8 ms along the whole path. Buttons are `home`, `lock`,
+and are sampled every 8 ms along the whole path. A comma-separated `--button` such as `volume_up,volume_down,volume_up` presses a combo, `--intervalMs` apart. Buttons are `home`, `lock`,
 `unlock`, `volume_up`, `volume_down`, and `mute`. Protected display
 layers are reported as unavailable. A button action can use `repeat` and
 `intervalMs` for a hardware-button sequence.

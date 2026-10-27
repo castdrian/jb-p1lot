@@ -63,19 +63,34 @@ static BOOL JBP1lotSetIdleSleepPrevented(id<JBP1lotBacklightControllerProtocol> 
     return YES;
 }
 
-static NSUInteger JBP1lotHomePressCount = 0;
-static CFAbsoluteTime JBP1lotLastHomePress = 0;
+static NSInteger const JBP1lotComboLength = 3;
+static CFAbsoluteTime const JBP1lotComboGap = 1.0;
+static NSMutableArray<NSNumber *> *JBP1lotRecentPresses;
+static CFAbsoluteTime JBP1lotLastPress = 0;
 static BOOL JBP1lotDisplayOverrideSet = NO;
 static BOOL JBP1lotRequestedDisplayEnabled = YES;
 
-void JBP1lotRegisterHomeButtonPress(void) {
+static NSArray<NSArray<NSNumber *> *> *JBP1lotBlackoutCombos(void) {
+    return @[
+        @[@(JBP1lotPressTypeHome), @(JBP1lotPressTypeHome), @(JBP1lotPressTypeHome)],
+        @[@(JBP1lotPressTypeVolumeUp), @(JBP1lotPressTypeVolumeDown), @(JBP1lotPressTypeVolumeUp)],
+    ];
+}
+
+void JBP1lotRegisterButtonPress(NSInteger type) {
+    if (type != JBP1lotPressTypeHome && type != JBP1lotPressTypeVolumeUp && type != JBP1lotPressTypeVolumeDown)
+        return;
     CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
-    if (now - JBP1lotLastHomePress > 1.0)
-        JBP1lotHomePressCount = 0;
-    JBP1lotLastHomePress = now;
-    JBP1lotHomePressCount += 1;
-    if (JBP1lotHomePressCount >= 3) {
-        JBP1lotHomePressCount = 0;
+    if (!JBP1lotRecentPresses)
+        JBP1lotRecentPresses = [NSMutableArray array];
+    if (now - JBP1lotLastPress > JBP1lotComboGap)
+        [JBP1lotRecentPresses removeAllObjects];
+    JBP1lotLastPress = now;
+    [JBP1lotRecentPresses addObject:@(type)];
+    while ((NSInteger)JBP1lotRecentPresses.count > JBP1lotComboLength)
+        [JBP1lotRecentPresses removeObjectAtIndex:0];
+    if ([JBP1lotBlackoutCombos() containsObject:JBP1lotRecentPresses]) {
+        [JBP1lotRecentPresses removeAllObjects];
         notify_post("dev.adrian.jb-p1lot.blackout.toggle");
     }
 }

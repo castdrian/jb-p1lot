@@ -94,7 +94,7 @@ void JBP1lotDisplayStart(void) {
     }
     notify_register_dispatch(JBP1lotBlackoutToggleNotification, &JBP1lotToggleToken, JBP1lotDisplayQueue, ^(int token) {
         JBP1lotBlackout = !JBP1lotBlackout;
-        JBP1lotBlackoutSource = @"home_triple_press";
+        JBP1lotBlackoutSource = @"button_combo";
         JBP1lotPersistDisplayState();
         JBP1lotApplyBlackout();
     });

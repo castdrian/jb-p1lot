@@ -4,24 +4,20 @@
 #import "DisplayControl.h"
 #import "InputInjector.h"
 
-static NSInteger const JBP1lotHomePressType = 101;
-
-static BOOL JBP1lotEndsHomePress(UIPressesEvent *event) {
+static void JBP1lotRegisterEndedPresses(UIPressesEvent *event) {
     if (![event isKindOfClass:[UIPressesEvent class]])
-        return NO;
+        return;
     for (UIPress *press in event.allPresses) {
-        if ((NSInteger)press.type == JBP1lotHomePressType && press.phase == UIPressPhaseEnded)
-            return YES;
+        if (press.phase == UIPressPhaseEnded)
+            JBP1lotRegisterButtonPress((NSInteger)press.type);
     }
-    return NO;
 }
 
 %hook SpringBoard
 
 - (BOOL)_handlePhysicalButtonEvent:(UIPressesEvent *)event {
     BOOL handled = %orig;
-    if (JBP1lotEndsHomePress(event) && !JBP1lotSyntheticButtonPressActive())
-        JBP1lotRegisterHomeButtonPress();
+    JBP1lotRegisterEndedPresses(event);
     return handled;
 }
 

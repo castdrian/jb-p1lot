@@ -509,12 +509,6 @@ typedef NS_ENUM(NSInteger, JBP1lotHardwareButton) {
     JBP1lotHardwareButtonMute,
 };
 
-static atomic_int JBP1lotSyntheticButtonPressDepth = 0;
-
-BOOL JBP1lotSyntheticButtonPressActive(void) {
-    return atomic_load(&JBP1lotSyntheticButtonPressDepth) > 0;
-}
-
 static void JBP1lotRunOnMain(dispatch_block_t block) {
     if ([NSThread isMainThread])
         block();
@@ -747,12 +741,7 @@ static BOOL JBP1lotPressButtonSequence(JBP1lotHardwareButton button, NSUInteger 
         }
         if (observed)
             observedPresses += 1;
-        if (button == JBP1lotHardwareButtonHome)
-            JBP1lotRunOnMain(^{
-                JBP1lotRegisterHomeButtonPress();
-            });
-        if (button == JBP1lotHardwareButtonHome)
-                if (index + 1 < repeat)
+        if (index + 1 < repeat)
             usleep((useconds_t)intervalMs * 1000);
     }
     if (observedPresses == repeat)
@@ -821,11 +810,34 @@ static BOOL JBP1lotPressHardwareButton(NSString *name, NSUInteger repeat, NSUInt
         *failureReason = [NSString stringWithFormat:@"unsupported hardware button \"%@\"", name];
         return NO;
     }
-    atomic_fetch_add(&JBP1lotSyntheticButtonPressDepth, 1);
     BOOL performed = JBP1lotPerformHardwareButton(button, repeat, intervalMs, failureReason);
     usleep(150000);
-    atomic_fetch_sub(&JBP1lotSyntheticButtonPressDepth, 1);
     return performed;
+}
+
+static BOOL JBP1lotPressButtonCombo(NSArray<NSString *> *names, NSUInteger intervalMs, NSString **failureReason) {
+    for (NSString *name in names) {
+        if (JBP1lotHardwareButtonNamed(name) == JBP1lotHardwareButtonUnsupported) {
+            *failureReason = [NSString stringWithFormat:@"unsupported hardware button \"%@\"", name];
+            return NO;
+        }
+    }
+    for (NSUInteger index = 0; index < names.count; index++) {
+        JBP1lotHardwareButton button = JBP1lotHardwareButtonNamed(names[index]);
+        BOOL observed = NO;
+        uint32_t consumerUsage = JBP1lotConsumerUsageForButton(button);
+        BOOL pressed = consumerUsage ? JBP1lotPressConsumerButton(consumerUsage, 1, intervalMs, failureReason)
+                                     : JBP1lotHIDButtonPress(button, &observed);
+        if (!pressed) {
+            if (!*failureReason)
+                *failureReason = @"hardware button HID event could not be dispatched";
+            return NO;
+        }
+        if (index + 1 < names.count)
+            usleep((useconds_t)intervalMs * 1000);
+    }
+    usleep(450000);
+    return YES;
 }
 
 static CGFloat JBP1lotEase(CGFloat progress, NSString *easing) {
@@ -913,6 +925,9 @@ BOOL JBP1lotInjectAction(NSDictionary *params, NSString **failureReason) {
         NSString *button = [params[@"button"] isKindOfClass:[NSString class]] ? params[@"button"] : @"";
         NSUInteger repeat = MAX(1, MIN([params[@"repeat"] unsignedIntegerValue], 5));
         NSUInteger interval = MAX(40, MIN([params[@"intervalMs"] unsignedIntegerValue] ?: 180, 1000));
+        NSArray<NSString *> *combo = [button componentsSeparatedByString:@","];
+        if (combo.count > 1)
+            return JBP1lotPressButtonCombo(combo, interval, failureReason);
         BOOL performed = JBP1lotPressHardwareButton(button, repeat, interval, failureReason);
         if (performed && [button.lowercaseString isEqualToString:@"home"] && repeat >= 3)
             usleep(450000);

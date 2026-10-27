@@ -54,14 +54,28 @@ static void JBP1lotPersistDisplayState(void) {
     [data writeToFile:JBP1lotDisplayStatePath atomically:YES];
 }
 
+static void JBP1lotReassertBlackout(void);
+
 static BOOL JBP1lotApplyBlackout(void) {
     BOOL agent = JBP1lotTellAgent(JBP1lotBlackout);
     BOOL panel = JBP1lotRequestPanelPower(!JBP1lotBlackout);
+    if (JBP1lotBlackout)
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), JBP1lotDisplayQueue, ^{
+            JBP1lotReassertBlackout();
+        });
     return agent || panel;
+}
+
+static BOOL JBP1lotSpringBoardScreenOn(void) {
+    NSDictionary *response = nil;
+    if (!JBP1lotForwardToAgent(@{ @"id": @0, @"method": @"display.state", @"payload": @{} }, &response)) return YES;
+    id on = [response[@"payload"] isKindOfClass:[NSDictionary class]] ? response[@"payload"][@"screenOn"] : nil;
+    return on ? [on boolValue] : YES;
 }
 
 static void JBP1lotReassertBlackout(void) {
     if (!JBP1lotBlackout) return;
+    if (!JBP1lotSpringBoardScreenOn()) return;
     if (!JBP1lotLastAgentRefresh || -JBP1lotLastAgentRefresh.timeIntervalSinceNow >= JBP1lotAgentRefreshInterval) JBP1lotTellAgent(YES);
     NSNumber *current = JBP1lotBacklightMicroAmps();
     if (current && current.integerValue == 0) return;

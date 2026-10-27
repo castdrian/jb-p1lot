@@ -18,6 +18,20 @@ static id JBP1lotMessage(id object, NSString *selectorName) {
     return [object respondsToSelector:selector] ? ((id (*)(id, SEL))objc_msgSend)(object, selector) : nil;
 }
 
+static NSDictionary *JBP1lotScreenState(void) {
+    __block NSDictionary *state = nil;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        id backlight = JBP1lotMessage(NSClassFromString(@"SBBacklightController"), @"sharedInstance");
+        SEL screenIsOn = NSSelectorFromString(@"screenIsOn");
+        BOOL on = [backlight respondsToSelector:screenIsOn] ? ((BOOL (*)(id, SEL))objc_msgSend)(backlight, screenIsOn) : YES;
+        id lockManager = JBP1lotMessage(NSClassFromString(@"SBLockScreenManager"), @"sharedInstance");
+        SEL isUILocked = NSSelectorFromString(@"isUILocked");
+        BOOL locked = [lockManager respondsToSelector:isUILocked] && ((BOOL (*)(id, SEL))objc_msgSend)(lockManager, isUILocked);
+        state = @{ @"screenOn": @(on), @"locked": @(locked) };
+    });
+    return state;
+}
+
 static NSDictionary *JBP1lotApplicationProcess(id bundleIdentifier) {
     __block NSDictionary *result = nil;
     dispatch_sync(dispatch_get_main_queue(), ^{
@@ -59,6 +73,9 @@ static NSDictionary *JBP1lotAgentResponse(NSDictionary *request) {
     if ([method isEqualToString:@"screen.stream.start"]) {
         NSString *session = [NSString stringWithFormat:@"screen-%@", NSUUID.UUID.UUIDString];
         return @{ @"status": @"ok", @"payload": @{ @"sessionId": session, @"url": [NSString stringWithFormat:@"jb-p1lot://screen/%@", session], @"codec": @"h264", @"fps": @([params[@"fps"] integerValue] ?: 30) } };
+    }
+    if ([method isEqualToString:@"display.state"]) {
+        return @{ @"status": @"ok", @"payload": JBP1lotScreenState() };
     }
     if ([method isEqualToString:@"ui.application"]) {
         return @{ @"status": @"ok", @"payload": JBP1lotApplicationProcess(params[@"bundleId"]) };

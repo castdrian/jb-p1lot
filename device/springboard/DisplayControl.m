@@ -3,6 +3,7 @@
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <CoreFoundation/CoreFoundation.h>
+#import <notify.h>
 
 @protocol JBP1lotBacklightControllerProtocol <NSObject>
 + (instancetype)sharedInstance;
@@ -10,8 +11,6 @@
 - (BOOL)screenIsDim;
 - (NSInteger)backlightState;
 - (void)_animateBacklightToFactor:(float)factor duration:(double)duration source:(NSInteger)source silently:(BOOL)silently completion:(id)completion;
-- (void)_startFadeOutAnimationFromLockSource:(int)source;
-- (void)turnOffScreenForSource:(NSInteger)source;
 - (void)turnOnScreenFullyWithBacklightSource:(NSInteger)source;
 - (void)setBacklightState:(NSInteger)state source:(NSInteger)source;
 - (void)setBacklightState:(NSInteger)state source:(NSInteger)source animated:(BOOL)animated completion:(id)completion;
@@ -53,41 +52,15 @@ static BOOL JBP1lotSetBrightnessFactor(NSNumber *factor) {
     return [client setProperty:factor forKey:@"DisplayBrightnessFactor"];
 }
 
-static BOOL JBP1lotTurnOffScreen(id backlight) {
-    BOOL performed = NO;
-    @try {
-        if ([backlight respondsToSelector:@selector(_startFadeOutAnimationFromLockSource:)]) {
-            ((void (*)(id, SEL, int))objc_msgSend)(backlight, @selector(_startFadeOutAnimationFromLockSource:), 3);
-            performed = YES;
-        }
-    } @catch (__unused NSException *exception) {
-    }
-    @try {
-        if ([backlight respondsToSelector:@selector(_animateBacklightToFactor:duration:source:silently:completion:)]) {
-            ((void (*)(id, SEL, float, double, NSInteger, BOOL, id))objc_msgSend)(backlight,
-                @selector(_animateBacklightToFactor:duration:source:silently:completion:), 0.0f, 0.25, 3, YES, nil);
-            performed = YES;
-        }
-    } @catch (__unused NSException *exception) {
-    }
-    @try {
-        if ([backlight respondsToSelector:@selector(turnOffScreenForSource:)]) {
-            ((void (*)(id, SEL, NSInteger))objc_msgSend)(backlight, @selector(turnOffScreenForSource:), 3);
-            performed = YES;
-        }
-    } @catch (__unused NSException *exception) {
-    }
-    @try {
-        if ([backlight respondsToSelector:@selector(setBacklightState:source:animated:completion:)]) {
-            ((void (*)(id, SEL, NSInteger, NSInteger, BOOL, id))objc_msgSend)(backlight, @selector(setBacklightState:source:animated:completion:), 0, 3, NO, nil);
-            performed = YES;
-        } else if ([backlight respondsToSelector:@selector(setBacklightState:source:)]) {
-            ((void (*)(id, SEL, NSInteger, NSInteger))objc_msgSend)(backlight, @selector(setBacklightState:source:), 0, 3);
-            performed = YES;
-        }
-    } @catch (__unused NSException *exception) {
-    }
-    return performed;
+static BOOL JBP1lotIdleSleepPrevented = NO;
+
+static BOOL JBP1lotSetIdleSleepPrevented(id<JBP1lotBacklightControllerProtocol> backlight, BOOL prevented) {
+    if (JBP1lotIdleSleepPrevented == prevented) return YES;
+    SEL selector = prevented ? @selector(preventIdleSleep) : @selector(allowIdleSleep);
+    if (![backlight respondsToSelector:selector]) return NO;
+    ((void (*)(id, SEL))objc_msgSend)(backlight, selector);
+    JBP1lotIdleSleepPrevented = prevented;
+    return YES;
 }
 
 static NSUInteger JBP1lotHomePressCount = 0;
@@ -103,10 +76,7 @@ void JBP1lotRegisterHomeButtonPress(void) {
     JBP1lotHomePressCount += 1;
     if (JBP1lotHomePressCount >= 3) {
         JBP1lotHomePressCount = 0;
-        BOOL nextEnabled = !JBP1lotRequestedDisplayEnabled;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            JBP1lotSetDisplayEnabled(nextEnabled);
-        });
+        notify_post("dev.adrian.jb-p1lot.blackout.toggle");
     }
 }
 
@@ -147,18 +117,11 @@ BOOL JBP1lotSetDisplayEnabled(BOOL enabled) {
             id<JBP1lotBacklightControllerProtocol> backlight = JBP1lotBacklightController();
             if (enabled) {
                 performed = JBP1lotSetBrightnessFactor(@1);
-                if ([backlight respondsToSelector:@selector(allowIdleSleep)]) {
-                    [backlight allowIdleSleep];
-                    performed = YES;
-                }
+                performed = JBP1lotSetIdleSleepPrevented(backlight, NO) || performed;
                 JBP1lotWakeDisplay();
             } else {
                 performed = JBP1lotSetBrightnessFactor(@0);
-                performed = JBP1lotTurnOffScreen(backlight) || performed;
-                if ([backlight respondsToSelector:@selector(preventIdleSleep)]) {
-                    [backlight preventIdleSleep];
-                    performed = YES;
-                }
+                performed = JBP1lotSetIdleSleepPrevented(backlight, YES) || performed;
             }
         } @catch (__unused NSException *exception) {
             performed = NO;
@@ -207,3 +170,4 @@ BOOL JBP1lotDisplayIsEnabled(void) {
     }
     return enabled;
 }
+

@@ -262,5 +262,5 @@ func writeJSON(value any) {
 func printUsage() {
 	root := filepath.Base(os.Args[0])
 	fmt.Printf("usage: %s <command> [options]\n", root)
-	fmt.Println("commands: device_list device_status device_action shell_exec file_list file_read file_write file_transfer file_search screen_capture screen_stream ui_snapshot ui_action ui_wait app_manage process_manage package_manage port_forward log_query crash_manage diagnostics_collect metrics_stream network_capture debug_session frida_session tweak_build tweak_deploy tweak_cycle session_list session_read session_write session_stop setup plugin mcp")
+	fmt.Println("commands: device_list device_status device_health device_action shell_exec file_list file_read file_write file_transfer file_search screen_capture screen_stream ui_snapshot ui_action ui_wait app_manage process_manage package_manage port_forward log_query crash_manage diagnostics_collect metrics_stream network_capture debug_session frida_session tweak_build tweak_deploy tweak_cycle session_list session_read session_write session_stop setup plugin mcp")
 }

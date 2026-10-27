@@ -21,6 +21,7 @@ jb-p1lot-daemon_FILES = $(DAEMON_FILES)
 jb-p1lot-daemon_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/device/daemon -DJBP1LOT_VERSION=\"$(PACKAGE_VERSION)\"
 jb-p1lot-daemon_FRAMEWORKS = Foundation Security CFNetwork Network
 jb-p1lot-daemon_INSTALL_PATH = /usr/libexec
+jb-p1lot-daemon_CODESIGN_FLAGS = -S$(THEOS_PROJECT_DIR)/device/resources/daemon-entitlements.plist
 
 APPLICATION_NAME = jb-p1lot
 jb-p1lot_BUNDLEID = dev.adrian.jb-p1lot

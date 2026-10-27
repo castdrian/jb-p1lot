@@ -1,0 +1,3 @@
+#!/bin/sh
+/var/jb/usr/libexec/jb-p1lot-daemon --release-power >/dev/null 2>&1 || true
+exit 0

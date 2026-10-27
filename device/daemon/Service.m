@@ -1,4 +1,6 @@
 #import "BridgeProtocol.h"
+#import "Display.h"
+#import "Health.h"
 #import <fcntl.h>
 #import <signal.h>
 #import <spawn.h>
@@ -139,11 +141,29 @@ static NSDictionary *JBP1lotPackageRequest(NSDictionary *params) {
     return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"invalid_frame", @"unknown package action") };
 }
 
+static NSDictionary *JBP1lotDisplayActionResponse(NSString *action) {
+    BOOL off = [@[@"screen_off", @"display_off", @"dark_on", @"blackout_on"] containsObject:action];
+    BOOL on = [@[@"screen_on", @"display_on", @"dark_off", @"blackout_off"] containsObject:action];
+    BOOL toggle = [action isEqualToString:@"blackout_toggle"];
+    if (!off && !on && !toggle) return nil;
+    BOOL blackout = toggle ? !JBP1lotBlackoutEnabled() : off;
+    if (!JBP1lotSetBlackout(blackout, @"request"))
+        return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"backend_error", @"display control unavailable") };
+    NSMutableDictionary *payload = [JBP1lotDisplayStatus() mutableCopy];
+    payload[@"performed"] = @YES;
+    payload[@"displayEnabled"] = @(!blackout);
+    payload[@"locked"] = @NO;
+    return @{ @"status": @"ok", @"payload": payload };
+}
+
 NSDictionary *JBP1lotHandleRequest(NSDictionary *request) {
     NSString *method = JBP1lotString(request, @"method");
     NSDictionary *params = [request[@"payload"] isKindOfClass:[NSDictionary class]] ? request[@"payload"] : @{};
     if ([method isEqualToString:@"device.status"]) {
-        return @{ @"status": @"ok", @"payload": @{ @"uid": @(getuid()), @"bridge": @YES, @"port": @(JBP1lotPort) } };
+        return @{ @"status": @"ok", @"payload": @{ @"uid": @(getuid()), @"bridge": @YES, @"port": @(JBP1lotPort), @"version": JBP1lotVersionString, @"health": JBP1lotHealthSummary(), @"display": JBP1lotDisplayStatus() } };
+    }
+    if ([method isEqualToString:@"device_health"]) {
+        return JBP1lotHealthRequest(params);
     }
     if ([method isEqualToString:@"shell_exec"]) {
         NSString *command = JBP1lotString(params, @"command");
@@ -314,16 +334,8 @@ NSDictionary *JBP1lotHandleRequest(NSDictionary *request) {
     if ([method isEqualToString:@"device_action"]) {
         NSString *action = [JBP1lotString(params, @"action") lowercaseString];
         NSString *normalizedAction = [action stringByReplacingOccurrencesOfString:@"-" withString:@"_"];
-        if ([@[@"screen_off", @"display_off", @"dark_on", @"screen_on", @"display_on", @"dark_off"] containsObject:normalizedAction]) {
-            NSMutableDictionary *agentRequest = [request mutableCopy];
-            NSMutableDictionary *agentParams = [params mutableCopy];
-            agentRequest[@"method"] = @"ui_action";
-            agentParams[@"action"] = normalizedAction;
-            agentRequest[@"payload"] = agentParams;
-            NSDictionary *response = nil;
-            if (JBP1lotForwardToAgent(agentRequest, &response))
-                return response;
-        }
+        NSDictionary *display = JBP1lotDisplayActionResponse(normalizedAction);
+        if (display) return display;
         if ([action isEqualToString:@"reboot"] || [action isEqualToString:@"userspace_reboot"] || [action isEqualToString:@"respring"] || [action isEqualToString:@"sbreload"]) {
             char *arguments[] = {"launchctl", "reboot", "userspace", NULL};
             pid_t pid = 0;
@@ -336,6 +348,11 @@ NSDictionary *JBP1lotHandleRequest(NSDictionary *request) {
         if ([action isEqualToString:@"full_reboot"] || [action isEqualToString:@"hardware_reboot"] || [action isEqualToString:@"reboot_full"]) {
             return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"invalid_frame", @"hardware reboot is unavailable; use userspace_reboot") };
         }
+    }
+    if ([method isEqualToString:@"ui_action"]) {
+        NSString *action = [[JBP1lotString(params, @"action") lowercaseString] stringByReplacingOccurrencesOfString:@"-" withString:@"_"];
+        NSDictionary *display = JBP1lotDisplayActionResponse(action);
+        if (display) return display;
     }
     if ([method hasPrefix:@"screen."] || [method hasPrefix:@"ui_"] || [method hasPrefix:@"ui."]) {
         NSDictionary *response = nil;

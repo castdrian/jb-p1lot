@@ -155,7 +155,7 @@ static int64_t JBP1lotSysctlInteger(const char *name) {
     return value;
 }
 
-static NSDictionary *JBP1lotMemorySnapshot(void) {
+NSDictionary *JBP1lotMemorySnapshot(void) {
     vm_statistics64_data_t stats = {0};
     mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
     vm_size_t pageSize = 0;

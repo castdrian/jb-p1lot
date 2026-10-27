@@ -93,6 +93,9 @@ func (m *Manager) Execute(ctx context.Context, request registry.Request) (regist
 	if request.Command == "tweak_cycle" {
 		return m.tweakCycle(ctx, selected, request)
 	}
+	if request.Command == "port_forward" {
+		return m.portForward(selected, request.Params)
+	}
 	if strings.HasPrefix(request.Command, "session_") {
 		return m.sessionCommand(request)
 	}
@@ -132,7 +135,10 @@ func (m *Manager) Execute(ctx context.Context, request registry.Request) (regist
 	if request.Command == "file_transfer" {
 		return m.fileTransfer(ctx, client, params)
 	}
-	if request.Command == "screen_stream" || request.Command == "metrics_stream" || request.Command == "debug_session" || request.Command == "frida_session" {
+	if request.Command == "debug_session" || request.Command == "frida_session" {
+		return m.remoteSession(ctx, client, selected, request.Command, params)
+	}
+	if request.Command == "screen_stream" || request.Command == "metrics_stream" {
 		return m.streamCommand(ctx, client, request.Command, params)
 	}
 	response, err := client.Call(ctx, request.Command, params)

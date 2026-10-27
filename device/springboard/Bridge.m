@@ -1,5 +1,6 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
+#import <objc/message.h>
 #import <sys/socket.h>
 #import <sys/stat.h>
 #import <sys/un.h>
@@ -10,8 +11,38 @@
 
 extern NSData *JBP1lotCapturePNG(void);
 
-static NSString *JBP1lotFrameIdentifier = @"";
 static int JBP1lotSocket = -1;
+
+static id JBP1lotMessage(id object, NSString *selectorName) {
+    SEL selector = NSSelectorFromString(selectorName);
+    return [object respondsToSelector:selector] ? ((id (*)(id, SEL))objc_msgSend)(object, selector) : nil;
+}
+
+static NSDictionary *JBP1lotApplicationProcess(id bundleIdentifier) {
+    __block NSDictionary *result = nil;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        id application = nil;
+        if ([bundleIdentifier isKindOfClass:[NSString class]] && [bundleIdentifier length] > 0 && ![bundleIdentifier isEqualToString:@"com.apple.springboard"]) {
+            id controller = JBP1lotMessage(NSClassFromString(@"SBApplicationController"), @"sharedInstance");
+            SEL lookup = NSSelectorFromString(@"applicationWithBundleIdentifier:");
+            application = [controller respondsToSelector:lookup] ? ((id (*)(id, SEL, id))objc_msgSend)(controller, lookup, bundleIdentifier) : nil;
+        } else {
+            application = JBP1lotMessage(UIApplication.sharedApplication, @"_accessibilityFrontMostApplication");
+        }
+        id processState = JBP1lotMessage(application, @"processState");
+        SEL pidSelector = NSSelectorFromString(@"pid");
+        int pid = [processState respondsToSelector:pidSelector] ? ((int (*)(id, SEL))objc_msgSend)(processState, pidSelector) : 0;
+        NSString *identifier = JBP1lotMessage(application, @"bundleIdentifier");
+        BOOL requested = [bundleIdentifier isKindOfClass:[NSString class]] && [bundleIdentifier length] > 0 && ![bundleIdentifier isEqualToString:@"com.apple.springboard"];
+        if (pid > 0)
+            result = @{ @"bundleId": identifier ?: @"", @"pid": @(pid), @"springboard": @NO, @"running": @YES };
+        else if (requested)
+            result = @{ @"bundleId": bundleIdentifier, @"pid": @0, @"springboard": @NO, @"running": @NO };
+        else
+            result = @{ @"bundleId": @"com.apple.springboard", @"pid": @(getpid()), @"springboard": @YES, @"running": @YES };
+    });
+    return result;
+}
 
 static NSDictionary *JBP1lotAgentResponse(NSDictionary *request) {
     NSString *method = [request[@"method"] isKindOfClass:[NSString class]] ? request[@"method"] : @"";
@@ -29,15 +60,10 @@ static NSDictionary *JBP1lotAgentResponse(NSDictionary *request) {
         NSString *session = [NSString stringWithFormat:@"screen-%@", NSUUID.UUID.UUIDString];
         return @{ @"status": @"ok", @"payload": @{ @"sessionId": session, @"url": [NSString stringWithFormat:@"jb-p1lot://screen/%@", session], @"codec": @"h264", @"fps": @([params[@"fps"] integerValue] ?: 30) } };
     }
-    if ([method isEqualToString:@"ui_snapshot"]) {
-        JBP1lotFrameIdentifier = NSUUID.UUID.UUIDString;
-        return @{ @"status": @"ok", @"payload": @{ @"frameId": JBP1lotFrameIdentifier, @"application": params[@"application"] ?: @"frontmost", @"nodes": @[], @"visualFallback": @YES } };
+    if ([method isEqualToString:@"ui.application"]) {
+        return @{ @"status": @"ok", @"payload": JBP1lotApplicationProcess(params[@"bundleId"]) };
     }
     if ([method isEqualToString:@"ui_action"]) {
-        NSString *frame = [params[@"frameId"] isKindOfClass:[NSString class]] ? params[@"frameId"] : @"";
-        if (frame.length > 0 && ![frame isEqualToString:JBP1lotFrameIdentifier]) {
-            return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"invalid_frame", @"accessibility node frame expired") };
-        }
         CFTimeInterval actionStart = CFAbsoluteTimeGetCurrent();
         NSString *failureReason = nil;
         BOOL performed = JBP1lotInjectAction(params, &failureReason);

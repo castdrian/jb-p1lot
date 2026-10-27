@@ -1,6 +1,10 @@
 #import "BridgeProtocol.h"
+#import "Accessibility.h"
 #import "Display.h"
 #import "Health.h"
+#import "Logs.h"
+#import "Metrics.h"
+#import "Sessions.h"
 #import <fcntl.h>
 #import <signal.h>
 #import <spawn.h>
@@ -151,7 +155,7 @@ static NSDictionary *JBP1lotDisplayActionResponse(NSString *action) {
         return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"backend_error", @"display control unavailable") };
     NSMutableDictionary *payload = [JBP1lotDisplayStatus() mutableCopy];
     payload[@"performed"] = @YES;
-    payload[@"displayEnabled"] = @(!blackout);
+    payload[@"displayEnabled"] = @((BOOL)!blackout);
     payload[@"locked"] = @NO;
     return @{ @"status": @"ok", @"payload": payload };
 }
@@ -264,17 +268,7 @@ NSDictionary *JBP1lotHandleRequest(NSDictionary *request) {
         return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"invalid_frame", @"unknown app action") };
     }
     if ([method isEqualToString:@"log_query"]) {
-        NSString *predicate = JBP1lotString(params, @"predicate");
-        NSString *process = JBP1lotString(params, @"process");
-        NSString *logPath = [[NSFileManager defaultManager] isExecutableFileAtPath:@"/var/jb/usr/bin/log"] ? @"/var/jb/usr/bin/log" : @"/usr/bin/log";
-        if (![[NSFileManager defaultManager] isExecutableFileAtPath:logPath])
-            return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"backend_error", @"unified log tool is unavailable on this device") };
-        NSString *command = [NSString stringWithFormat:@"%@ show --style compact --last 10m", logPath];
-        if (predicate.length > 0) command = [command stringByAppendingFormat:@" --predicate %@", JBP1lotQuote(predicate)];
-        if (process.length > 0) command = [command stringByAppendingFormat:@" --process %@", JBP1lotQuote(process)];
-        NSInteger limit = [params[@"limit"] integerValue] ?: 2000;
-        command = [command stringByAppendingFormat:@" | tail -n %ld", (long)MIN(MAX(limit, 1), 20000)];
-        return JBP1lotRunResult(command, 60000);
+        return JBP1lotLogQuery(params);
     }
     if ([method isEqualToString:@"crash_manage"]) {
         NSString *action = [JBP1lotString(params, @"action") lowercaseString];
@@ -296,10 +290,7 @@ NSDictionary *JBP1lotHandleRequest(NSDictionary *request) {
         return result;
     }
     if ([method isEqualToString:@"metrics_stream"]) {
-        NSString *process = JBP1lotString(params, @"process");
-        NSString *processPattern = process.length > 0 ? JBP1lotQuote(process) : JBP1lotQuote(@"YouTube");
-        NSString *command = [NSString stringWithFormat:@"pid=$(ps -axo pid,args | /var/jb/usr/bin/grep -F %@ | /var/jb/usr/bin/grep -v grep | /var/jb/usr/bin/sed -n '1s/^[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p'); if [ -n \"$pid\" ]; then ps -p \"$pid\" -o pid,pcpu,rss,etime,comm; /var/jb/usr/bin/ltop -p \"$pid\" -r phys_mem 0; /var/jb/usr/bin/ltop -p \"$pid\" -r phys_footprint 0; /var/jb/usr/bin/ltop -p \"$pid\" -r cpu_time 0; fi; /usr/bin/vm_stat; exit 0", processPattern];
-        return JBP1lotRunResult(command, [params[@"durationMs"] integerValue] ?: 30000);
+        return JBP1lotMetricsSample(params);
     }
     if ([method isEqualToString:@"network_capture"]) {
         NSString *path = [NSString stringWithFormat:@"/var/mobile/Media/jb-p1lot/capture-%@.pcap", NSUUID.UUID.UUIDString];
@@ -313,13 +304,8 @@ NSDictionary *JBP1lotHandleRequest(NSDictionary *request) {
         if (data) return @{ @"status": @"ok", @"payload": @{ @"path": path, @"data": [data base64EncodedStringWithOptions:0], @"mimeType": @"application/vnd.tcpdump.pcap" } };
         return run;
     }
-    if ([method isEqualToString:@"port_forward"]) {
-        NSString *session = [NSString stringWithFormat:@"forward-%@", NSUUID.UUID.UUIDString];
-        return @{ @"status": @"ok", @"payload": @{ @"sessionId": session, @"localPort": params[@"localPort"] ?: @0, @"remotePort": params[@"remotePort"] ?: @0 } };
-    }
     if ([method isEqualToString:@"debug_session"] || [method isEqualToString:@"frida_session"]) {
-        NSString *session = [NSString stringWithFormat:@"%@-%@", [method hasPrefix:@"debug"] ? @"lldb" : @"frida", NSUUID.UUID.UUIDString];
-        return @{ @"status": @"ok", @"payload": @{ @"sessionId": session, @"backend": [method hasPrefix:@"debug"] ? @"debugserver" : @"frida" } };
+        return JBP1lotManagedSessionRequest([method hasPrefix:@"debug"] ? @"lldb" : @"frida", params);
     }
     if ([method isEqualToString:@"tweak_deploy"] || [method isEqualToString:@"tweak_cycle"]) {
         NSString *path = JBP1lotString(params, @"path");
@@ -349,10 +335,37 @@ NSDictionary *JBP1lotHandleRequest(NSDictionary *request) {
             return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"invalid_frame", @"hardware reboot is unavailable; use userspace_reboot") };
         }
     }
+    if ([method isEqualToString:@"ui_snapshot"]) {
+        return JBP1lotUISnapshot(params);
+    }
+    if ([method isEqualToString:@"ui_wait"]) {
+        return JBP1lotUIWait(params);
+    }
     if ([method isEqualToString:@"ui_action"]) {
         NSString *action = [[JBP1lotString(params, @"action") lowercaseString] stringByReplacingOccurrencesOfString:@"-" withString:@"_"];
         NSDictionary *display = JBP1lotDisplayActionResponse(action);
         if (display) return display;
+        NSDictionary *targetError = nil;
+        NSDictionary *target = JBP1lotResolveUITarget(params, &targetError);
+        if (!target) return @{ @"status": @"error", @"error": targetError };
+        if (target != params) {
+            NSMutableDictionary *forwarded = [request mutableCopy];
+            NSMutableDictionary *payload = [target mutableCopy];
+            NSDictionary *node = payload[@"resolvedNode"];
+            [payload removeObjectForKey:@"resolvedNode"];
+            forwarded[@"payload"] = payload;
+            NSDictionary *response = nil;
+            if (!JBP1lotForwardToAgent(forwarded, &response))
+                return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"unavailable", @"SpringBoard agent is unavailable") };
+            if ([response[@"payload"] isKindOfClass:[NSDictionary class]] && ![response[@"status"] isEqual:@"error"]) {
+                NSMutableDictionary *merged = [response mutableCopy];
+                NSMutableDictionary *mergedPayload = [response[@"payload"] mutableCopy];
+                mergedPayload[@"node"] = node;
+                merged[@"payload"] = mergedPayload;
+                return merged;
+            }
+            return response;
+        }
     }
     if ([method hasPrefix:@"screen."] || [method hasPrefix:@"ui_"] || [method hasPrefix:@"ui."]) {
         NSDictionary *response = nil;

@@ -7,5 +7,5 @@ Maintainer: adrian
 Author: adrian
 Section: Development
 Priority: optional
-Depends: ellekit
+Depends: ellekit, ldid
 Icon: icon.png

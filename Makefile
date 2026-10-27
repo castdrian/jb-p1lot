@@ -38,6 +38,8 @@ include $(THEOS_MAKE_PATH)/tool.mk
 include $(THEOS_MAKE_PATH)/application.mk
 
 after-stage::
+	$(ECHO_NOTHING)mkdir -p $(THEOS_STAGING_DIR)/usr/share/jb-p1lot$(ECHO_END)
+	$(ECHO_NOTHING)cp device/resources/debugserver-entitlements.plist $(THEOS_STAGING_DIR)/usr/share/jb-p1lot/$(ECHO_END)
 	$(ECHO_NOTHING)mkdir -p $(THEOS_STAGING_DIR)/Library/LaunchDaemons$(ECHO_END)
 	$(ECHO_NOTHING)cp device/resources/dev.adrian.jb-p1lot.daemon.plist $(THEOS_STAGING_DIR)/Library/LaunchDaemons/$(ECHO_END)
 	$(ECHO_NOTHING)mkdir -p $(THEOS_STAGING_DIR)/Library/MobileSubstrate/DynamicLibraries$(ECHO_END)

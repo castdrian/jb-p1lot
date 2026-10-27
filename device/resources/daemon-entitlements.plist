@@ -12,6 +12,16 @@
 	<true/>
 	<key>com.apple.private.iokit.batterydata</key>
 	<true/>
+	<key>com.apple.private.logging.admin</key>
+	<true/>
+	<key>com.apple.private.logging.stream</key>
+	<true/>
+	<key>com.apple.diagnosticd.diagnostic</key>
+	<true/>
+	<key>com.apple.accessibility.api</key>
+	<true/>
+	<key>com.apple.private.accessibility.inspection</key>
+	<true/>
 	<key>com.apple.private.iomfb.set-block</key>
 	<true/>
 	<key>com.apple.security.iokit-user-client-class</key>

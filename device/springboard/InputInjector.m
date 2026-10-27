@@ -38,6 +38,9 @@ static const uint32_t JBP1lotKeyboardUsagePage = 0x07u;
 static const uint32_t JBP1lotConsumerUsagePage = 0x0Cu;
 static const uint32_t JBP1lotConsumerPowerUsage = 0x30u;
 static const uint32_t JBP1lotConsumerMenuUsage = 0x40u;
+static const uint32_t JBP1lotConsumerMuteUsage = 0xE2u;
+static const uint32_t JBP1lotConsumerVolumeUpUsage = 0xE9u;
+static const uint32_t JBP1lotConsumerVolumeDownUsage = 0xEAu;
 static const uint64_t JBP1lotHIDSenderID = 0x8000000817319375ULL;
 
 static JBP1lotHIDFunctions JBP1lotHIDLoadFunctions(void) {
@@ -501,6 +504,9 @@ typedef NS_ENUM(NSInteger, JBP1lotHardwareButton) {
     JBP1lotHardwareButtonHome,
     JBP1lotHardwareButtonLock,
     JBP1lotHardwareButtonUnlock,
+    JBP1lotHardwareButtonVolumeUp,
+    JBP1lotHardwareButtonVolumeDown,
+    JBP1lotHardwareButtonMute,
 };
 
 static atomic_int JBP1lotSyntheticButtonPressDepth = 0;
@@ -772,10 +778,40 @@ static JBP1lotHardwareButton JBP1lotHardwareButtonNamed(NSString *name) {
         return JBP1lotHardwareButtonLock;
     if ([@[@"unlock", @"wake"] containsObject:normalized])
         return JBP1lotHardwareButtonUnlock;
+    if ([@[@"volume_up", @"volumeup", @"volume_increment"] containsObject:normalized])
+        return JBP1lotHardwareButtonVolumeUp;
+    if ([@[@"volume_down", @"volumedown", @"volume_decrement"] containsObject:normalized])
+        return JBP1lotHardwareButtonVolumeDown;
+    if ([@[@"mute", @"ringer", @"silent"] containsObject:normalized])
+        return JBP1lotHardwareButtonMute;
     return JBP1lotHardwareButtonUnsupported;
 }
 
+static uint32_t JBP1lotConsumerUsageForButton(JBP1lotHardwareButton button) {
+    switch (button) {
+        case JBP1lotHardwareButtonVolumeUp: return JBP1lotConsumerVolumeUpUsage;
+        case JBP1lotHardwareButtonVolumeDown: return JBP1lotConsumerVolumeDownUsage;
+        case JBP1lotHardwareButtonMute: return JBP1lotConsumerMuteUsage;
+        default: return 0;
+    }
+}
+
+static BOOL JBP1lotPressConsumerButton(uint32_t usage, NSUInteger repeat, NSUInteger intervalMs, NSString **failureReason) {
+    for (NSUInteger index = 0; index < repeat; index++) {
+        if (!JBP1lotHIDKeyEvent(JBP1lotConsumerUsagePage, usage, YES) || !JBP1lotHIDKeyEvent(JBP1lotConsumerUsagePage, usage, NO)) {
+            *failureReason = @"consumer button HID event could not be dispatched";
+            return NO;
+        }
+        if (index + 1 < repeat)
+            usleep((useconds_t)intervalMs * 1000);
+    }
+    return YES;
+}
+
 static BOOL JBP1lotPerformHardwareButton(JBP1lotHardwareButton button, NSUInteger repeat, NSUInteger intervalMs, NSString **failureReason) {
+    uint32_t consumerUsage = JBP1lotConsumerUsageForButton(button);
+    if (consumerUsage)
+        return JBP1lotPressConsumerButton(consumerUsage, repeat, intervalMs, failureReason);
     if (button == JBP1lotHardwareButtonUnlock)
         return JBP1lotUnlockDevice(failureReason);
     if (repeat > 1)
@@ -796,6 +832,73 @@ static BOOL JBP1lotPressHardwareButton(NSString *name, NSUInteger repeat, NSUInt
     return performed;
 }
 
+static CGFloat JBP1lotEase(CGFloat progress, NSString *easing) {
+    if ([easing isEqualToString:@"ease_in"])
+        return progress * progress;
+    if ([easing isEqualToString:@"ease_out"])
+        return 1 - (1 - progress) * (1 - progress);
+    if ([easing isEqualToString:@"ease_in_out"])
+        return progress < 0.5 ? 2 * progress * progress : 1 - pow(-2 * progress + 2, 2) / 2;
+    return progress;
+}
+
+static CGPoint JBP1lotPointAlongPath(NSArray<NSValue *> *points, NSArray<NSNumber *> *offsets, CGFloat distance) {
+    for (NSUInteger index = 1; index < points.count; index++) {
+        CGFloat segmentEnd = offsets[index].doubleValue;
+        if (distance > segmentEnd && index + 1 < points.count)
+            continue;
+        CGFloat segmentStart = offsets[index - 1].doubleValue;
+        CGFloat length = segmentEnd - segmentStart;
+        CGFloat fraction = length > 0 ? MIN(MAX((distance - segmentStart) / length, 0), 1) : 1;
+        CGPoint from = points[index - 1].CGPointValue;
+        CGPoint to = points[index].CGPointValue;
+        return CGPointMake(from.x + (to.x - from.x) * fraction, from.y + (to.y - from.y) * fraction);
+    }
+    return points.lastObject.CGPointValue;
+}
+
+static void JBP1lotSleepUntil(uint64_t deadline) {
+    static mach_timebase_info_data_t timebase;
+    if (timebase.denom == 0)
+        mach_timebase_info(&timebase);
+    uint64_t now = mach_absolute_time();
+    if (deadline <= now)
+        return;
+    uint64_t nanoseconds = (deadline - now) * timebase.numer / timebase.denom;
+    usleep((useconds_t)(nanoseconds / 1000));
+}
+
+static BOOL JBP1lotPerformPathGesture(NSArray<NSValue *> *points, NSUInteger durationMs, NSString *easing) {
+    NSMutableArray<NSNumber *> *offsets = [NSMutableArray arrayWithObject:@0];
+    for (NSUInteger index = 1; index < points.count; index++) {
+        CGPoint from = points[index - 1].CGPointValue;
+        CGPoint to = points[index].CGPointValue;
+        [offsets addObject:@(offsets.lastObject.doubleValue + hypot(to.x - from.x, to.y - from.y))];
+    }
+    CGFloat totalDistance = offsets.lastObject.doubleValue;
+    static mach_timebase_info_data_t timebase;
+    if (timebase.denom == 0)
+        mach_timebase_info(&timebase);
+    double frameMs = 8.0;
+    NSUInteger frames = MAX(2, (NSUInteger)ceil(durationMs / frameMs));
+    uint64_t frameTicks = (uint64_t)(durationMs * 1e6 / frames * timebase.denom / timebase.numer);
+    CGPoint start = points.firstObject.CGPointValue;
+    if (!JBP1lotHIDPoint(start.x, start.y, YES))
+        return NO;
+    uint64_t origin = mach_absolute_time();
+    CGPoint current = start;
+    for (NSUInteger frame = 1; frame <= frames; frame++) {
+        JBP1lotSleepUntil(origin + frameTicks * frame);
+        CGFloat progress = JBP1lotEase((CGFloat)frame / (CGFloat)frames, easing);
+        current = JBP1lotPointAlongPath(points, offsets, totalDistance * progress);
+        if (!JBP1lotHIDPoint(current.x, current.y, YES)) {
+            JBP1lotHIDPoint(current.x, current.y, NO);
+            return NO;
+        }
+    }
+    return JBP1lotHIDPoint(current.x, current.y, NO);
+}
+
 BOOL JBP1lotInjectAction(NSDictionary *params, NSString **failureReason) {
     NSString *action = [params[@"action"] isKindOfClass:[NSString class]] ? [params[@"action"] lowercaseString] : @"";
     if ([action isEqualToString:@"screen_off"] || [action isEqualToString:@"display_off"] || [action isEqualToString:@"dark_on"]) {
@@ -813,6 +916,8 @@ BOOL JBP1lotInjectAction(NSDictionary *params, NSString **failureReason) {
             usleep(450000);
         return performed;
     }
+    if ([params[@"unlock"] boolValue] && !JBP1lotUnlockDevice(failureReason))
+        return NO;
     CGFloat x = 0;
     CGFloat y = 0;
     BOOL hasPoint = NO;
@@ -859,45 +964,9 @@ BOOL JBP1lotInjectAction(NSDictionary *params, NSString **failureReason) {
         if (points.count < 2)
             return NO;
 
-        NSUInteger totalSteps = 0;
-        for (NSUInteger index = 1; index < points.count; index++) {
-            CGPoint from = points[index - 1].CGPointValue;
-            CGPoint to = points[index].CGPointValue;
-            CGFloat distance = hypot(to.x - from.x, to.y - from.y);
-            totalSteps += MAX(1, (NSUInteger)ceil(distance / 12.0));
-        }
-        NSUInteger durationMs = MAX(40, MIN([params[@"durationMs"] unsignedIntegerValue] ?: 200, 2000));
-        if (!JBP1lotHIDPoint(startPoint.x, startPoint.y, YES))
-            return NO;
-
-        NSUInteger completedSteps = 0;
-        for (NSUInteger index = 1; index < points.count; index++) {
-            CGPoint from = points[index - 1].CGPointValue;
-            CGPoint to = points[index].CGPointValue;
-            CGFloat distance = hypot(to.x - from.x, to.y - from.y);
-            NSUInteger segmentSteps = MAX(1, (NSUInteger)ceil(distance / 12.0));
-            for (NSUInteger step = 1; step <= segmentSteps; step++) {
-                CGFloat fraction = (CGFloat)step / (CGFloat)segmentSteps;
-                CGPoint point = CGPointMake(from.x + ((to.x - from.x) * fraction),
-                                            from.y + ((to.y - from.y) * fraction));
-                if (!JBP1lotHIDPoint(point.x, point.y, YES)) {
-                    JBP1lotHIDPoint(point.x, point.y, NO);
-                    return NO;
-                }
-                completedSteps += 1;
-                NSUInteger remainingSteps = totalSteps - completedSteps;
-                NSUInteger remainingMilliseconds = durationMs * remainingSteps / totalSteps;
-                NSUInteger nextMilliseconds = durationMs * completedSteps / totalSteps;
-                if (remainingMilliseconds > 0 && nextMilliseconds > 0)
-                    usleep((useconds_t)(nextMilliseconds - (durationMs * (completedSteps - 1) / totalSteps)) * 1000);
-            }
-        }
-        CGPoint lastPoint = points.lastObject.CGPointValue;
-        if (!JBP1lotHIDPoint(lastPoint.x, lastPoint.y, NO)) {
-            JBP1lotHIDPoint(lastPoint.x, lastPoint.y, NO);
-            return NO;
-        }
-        return YES;
+        NSUInteger durationMs = MAX(40, MIN([params[@"durationMs"] unsignedIntegerValue] ?: 200, 5000));
+        NSString *easing = [params[@"easing"] isKindOfClass:[NSString class]] ? [params[@"easing"] lowercaseString] : @"linear";
+        return JBP1lotPerformPathGesture(points, durationMs, easing);
     }
     if ([action isEqualToString:@"text"]) {
         NSString *text = [params[@"text"] isKindOfClass:[NSString class]] ? params[@"text"] : @"";

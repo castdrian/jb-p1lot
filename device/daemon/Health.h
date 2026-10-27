@@ -5,3 +5,4 @@ void JBP1lotHealthReleasePower(void);
 NSDictionary *JBP1lotHealthSummary(void);
 NSDictionary *JBP1lotHealthRequest(NSDictionary *params);
 NSDictionary *JBP1lotBatterySnapshot(void);
+NSDictionary *JBP1lotMemorySnapshot(void);

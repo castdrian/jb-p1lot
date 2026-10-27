@@ -8,4 +8,4 @@ Author: adrian
 Section: Development
 Icon: icon.png
 Priority: optional
-Depends: ellekit
+Depends: ellekit, ldid

@@ -11,6 +11,12 @@
         JBP1lotRegisterHomeButtonPress();
 }
 
+- (void)triplePressUp:(id)gestureRecognizer {
+    %orig;
+    if (!JBP1lotSyntheticButtonPressActive())
+        JBP1lotRegisterHomeTriplePress();
+}
+
 %end
 
 %ctor {

@@ -80,6 +80,12 @@ void JBP1lotRegisterHomeButtonPress(void) {
     }
 }
 
+void JBP1lotRegisterHomeTriplePress(void) {
+    JBP1lotHomePressCount = 0;
+    JBP1lotLastHomePress = 0;
+    notify_post("dev.adrian.jb-p1lot.blackout.toggle");
+}
+
 void JBP1lotWakeDisplay(void) {
     UIApplication *application = UIApplication.sharedApplication;
     id backlight = JBP1lotBacklightController();

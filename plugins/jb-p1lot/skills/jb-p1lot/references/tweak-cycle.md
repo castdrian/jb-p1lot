@@ -1,7 +1,10 @@
 # Tweak cycle
 
 Use `tweak_build` to run Theos with `gmake`, select the newest package, and
-retain a previous package for rollback. Use `tweak_deploy` for a scoped reload
+retain a previous package for rollback. Use `self_update --package <deb>` to
+update jb-p1lot itself: it installs detached, so the daemon's own restart does
+not cut the install short, then waits for the new bridge and checks its version.
+Use `tweak_deploy` for a scoped reload
 and heartbeat verification. Use `tweak_cycle` for build, install, process
 reload, scoped logs, crash detection, and automatic rollback.
 

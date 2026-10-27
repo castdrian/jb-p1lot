@@ -181,7 +181,7 @@ NSDictionary *JBP1lotHandleRequest(NSDictionary *request) {
     NSString *method = JBP1lotString(request, @"method");
     NSDictionary *params = [request[@"payload"] isKindOfClass:[NSDictionary class]] ? request[@"payload"] : @{};
     if ([method isEqualToString:@"device.status"]) {
-        return @{ @"status": @"ok", @"payload": @{ @"uid": @(getuid()), @"bridge": @YES, @"port": @(JBP1lotPort), @"version": JBP1lotVersionString, @"health": JBP1lotHealthSummary(), @"display": JBP1lotDisplayStatus() } };
+        return @{ @"status": @"ok", @"payload": @{ @"uid": @(getuid()), @"pid": @(getpid()), @"bridge": @YES, @"port": @(JBP1lotPort), @"version": JBP1lotVersionString, @"health": JBP1lotHealthSummary(), @"display": JBP1lotDisplayStatus() } };
     }
     if ([method isEqualToString:@"device_health"]) {
         return JBP1lotHealthRequest(params);

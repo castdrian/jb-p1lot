@@ -1,3 +1,7 @@
+ifneq ($(filter deploy,$(MAKECMDGOALS)),)
+FINALPACKAGE = 1
+endif
+
 ARCHS = arm64 arm64e
 TARGET = iphone:clang:latest:15.0
 THEOS_PACKAGE_SCHEME = rootless
@@ -48,3 +52,8 @@ after-stage::
 	$(ECHO_NOTHING)cp device/resources/jb-p1lot.plist $(THEOS_STAGING_DIR)/Library/MobileSubstrate/DynamicLibraries/$(ECHO_END)
 	$(ECHO_NOTHING)rm -f $(THEOS_STAGING_DIR)/Library/MobileSubstrate/DynamicLibraries/jb-p1lot-tweak.plist$(ECHO_END)
 	$(ECHO_NOTHING)mv $(THEOS_STAGING_DIR)/Library/MobileSubstrate/DynamicLibraries/jb-p1lot-tweak.dylib $(THEOS_STAGING_DIR)/Library/MobileSubstrate/DynamicLibraries/jb-p1lot.dylib$(ECHO_END)
+
+deploy: package
+	go run ./cmd/jb-p1lot self_update $(if $(DEVICE),--device $(DEVICE)) --package "$$(ls -t $(CURDIR)/packages/*.deb | head -1)"
+
+.PHONY: deploy

@@ -94,6 +94,9 @@ func (m *Manager) Execute(ctx context.Context, request registry.Request) (regist
 	if request.Command == "tweak_cycle" {
 		return m.tweakCycle(ctx, selected, request)
 	}
+	if request.Command == "self_update" {
+		return m.selfUpdate(ctx, selected, request)
+	}
 	if request.Command == "port_forward" {
 		return m.portForward(selected, request.Params)
 	}

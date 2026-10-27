@@ -54,6 +54,10 @@ python3 scripts/validate_plugin.py plugins/jb-p1lot
 python3 scripts/validate_skill.py skills/jb-p1lot
 ```
 
+`gmake deploy DEVICE=<udid>` builds the package, installs it on the device with
+`self_update`, waits for the bridge to restart, and fails unless the device
+reports the host's version.
+
 See `skills/jb-p1lot` for focused routing guidance. See
 `THIRD_PARTY_NOTICES.md` for ScreenMirror and MCP SDK attribution.
 

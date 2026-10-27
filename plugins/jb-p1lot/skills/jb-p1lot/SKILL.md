@@ -16,8 +16,13 @@ Never infer a target from network order or an arbitrary first result.
 - Build, deploy, logs, and rollback: read [tweak-cycle.md](references/tweak-cycle.md).
 - LLDB, Frida, and packet capture: read [debugging.md](references/debugging.md).
 - SpringBoard recovery and Dopamine reconnect: read [recovery.md](references/recovery.md).
+- Battery, charging, thermal, display blackout, and alerts: read [health.md](references/health.md).
 
 ## Defaults
+
+Run `device_status` first. It reports the bridge version, a health summary,
+and the display state, and it warns when the host and device versions differ;
+install the matching package before relying on newer commands.
 
 The bridge uses encrypted WiFi on TCP 5912 and prefers a USBMux tunnel when
 USB is present. Pairing grants root authority to the paired host. Use bounded

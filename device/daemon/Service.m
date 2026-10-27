@@ -1,5 +1,6 @@
 #import "BridgeProtocol.h"
 #import "Accessibility.h"
+#import "Applications.h"
 #import "Display.h"
 #import "Health.h"
 #import "Logs.h"
@@ -246,8 +247,12 @@ NSDictionary *JBP1lotHandleRequest(NSDictionary *request) {
     if ([method isEqualToString:@"package_manage"]) {
         return JBP1lotPackageRequest(params);
     }
+    if ([method isEqualToString:@"app_container"]) {
+        return JBP1lotAppContainer(params);
+    }
     if ([method isEqualToString:@"app_manage"]) {
         NSString *action = [JBP1lotString(params, @"action") lowercaseString];
+        if ([action isEqualToString:@"container"]) return JBP1lotAppContainer(params);
         if ([action isEqualToString:@"list"] || action.length == 0) {
             return JBP1lotRunResult(@"find /Applications /var/jb/Applications -maxdepth 2 -name '*.app' -type d -print 2>/dev/null", 30000);
         }

@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	jbp1lot "github.com/castdrian/jb-p1lot"
 	"math/big"
 	"os"
 	"os/exec"
@@ -60,7 +61,7 @@ func Run(ctx context.Context, options Options) (Report, error) {
 	if options.RepoRoot == "" {
 		options.RepoRoot, _ = os.Getwd()
 	}
-	report := Report{Version: "0.1.11", Platform: runtime.GOOS + "/" + runtime.GOARCH, Actions: []string{}}
+	report := Report{Version: jbp1lot.Version, Platform: runtime.GOOS + "/" + runtime.GOARCH, Actions: []string{}}
 	report.Checks = checkTools(ctx)
 	identity, identityErr := EnsureIdentity()
 	report.Identity = identity

@@ -1,0 +1,32 @@
+name: Checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25.x"
+
+      - name: Version
+        run: ./scripts/check-version.sh
+
+      - name: Skill and plugin
+        run: |
+          python3 scripts/validate_skill.py skills/jb-p1lot
+          python3 scripts/validate_plugin.py
+
+      - name: Go
+        run: |
+          test -z "$(gofmt -l cmd internal version.go)"
+          go vet ./...
+          go test ./...

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	jbp1lot "github.com/castdrian/jb-p1lot"
 	"log/slog"
 
 	"github.com/castdrian/jb-p1lot/internal/registry"
@@ -11,7 +12,7 @@ import (
 )
 
 func New(registryValue *registry.Registry) *mcp.Server {
-	server := mcp.NewServer(&mcp.Implementation{Name: "jb-p1lot", Title: "jb-p1lot", Version: "0.1.11"}, &mcp.ServerOptions{
+	server := mcp.NewServer(&mcp.Implementation{Name: "jb-p1lot", Title: "jb-p1lot", Version: jbp1lot.Version}, &mcp.ServerOptions{
 		Instructions: "Use the jb-p1lot MCP server with the jb-p1lot skill for exact targeting, visual and semantic UI flows, tweak cycles, debugging, and userspace-only recovery.",
 		Logger:       slog.Default(),
 	})

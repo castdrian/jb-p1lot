@@ -10,3 +10,7 @@ large transfers. Disconnecting USB should leave the Bonjour WiFi endpoint on
 If multiple devices are returned and no selector is supplied, stop and report
 the candidates. If no bridge is discovered, check the jailbreak, daemon,
 Developer Disk Image, and mTLS identity before attempting package operations.
+
+Resolve an app's bundle path, data container, and app group containers with
+`app_container --bundle <bundle id>`; `--path Documents/X` also returns the
+resolved path inside the data container and whether it exists.

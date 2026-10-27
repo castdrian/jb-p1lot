@@ -42,7 +42,7 @@ jobs:
         run: |
           CONTROL=device/resources/control
           PACKAGE=$(grep '^Package:' "$CONTROL" | cut -d ' ' -f 2)
-          VERSION=$(grep '^Version:' "$CONTROL" | cut -d ' ' -f 2)
+          VERSION=$(cat VERSION)
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           ROOTLESS_DEB_FILE_NAME="${PACKAGE}_${VERSION}_iphoneos-arm64.deb"
           echo "ROOTLESS_DEB_FILE_NAME=$ROOTLESS_DEB_FILE_NAME" >> "$GITHUB_ENV"

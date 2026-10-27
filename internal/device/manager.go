@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	jbp1lot "github.com/castdrian/jb-p1lot"
 	"net"
 	"os"
 	"os/exec"
@@ -181,6 +182,9 @@ func (m *Manager) deviceStatus(ctx context.Context, selector string) (registry.R
 			var bridge map[string]any
 			if json.Unmarshal(response.Payload, &bridge) == nil {
 				status["bridge"] = bridge
+				if warning := versionWarning(bridge); warning != "" {
+					status["warnings"] = []string{warning}
+				}
 				if enabled, ok := bridge["bridge"].(bool); ok && enabled {
 					selected.Bridge = true
 					if uid, ok := bridge["uid"].(float64); ok && uid == 0 {
@@ -197,6 +201,17 @@ func (m *Manager) deviceStatus(ctx context.Context, selector string) (registry.R
 		status["bridgeError"] = clientErr.Error()
 	}
 	return registry.Result{Data: status}, nil
+}
+
+func versionWarning(bridge map[string]any) string {
+	deviceVersion, _ := bridge["version"].(string)
+	if deviceVersion == "" {
+		return "device bridge predates version reporting; reinstall the jb-p1lot package to match host " + jbp1lot.Version
+	}
+	if deviceVersion != jbp1lot.Version {
+		return fmt.Sprintf("host jb-p1lot %s does not match device bridge %s; install the matching package", jbp1lot.Version, deviceVersion)
+	}
+	return ""
 }
 
 func (m *Manager) client(ctx context.Context, selected discovery.Device) (*transport.Client, error) {

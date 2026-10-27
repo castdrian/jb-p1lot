@@ -1,7 +1,7 @@
 ARCHS = arm64 arm64e
 TARGET = iphone:clang:latest:15.0
 THEOS_PACKAGE_SCHEME = rootless
-PACKAGE_VERSION = 0.1.11
+PACKAGE_VERSION = $(shell cat $(THEOS_PROJECT_DIR)/VERSION 2>/dev/null || cat VERSION)
 
 include $(THEOS)/makefiles/common.mk
 
@@ -38,6 +38,8 @@ include $(THEOS_MAKE_PATH)/tool.mk
 include $(THEOS_MAKE_PATH)/application.mk
 
 after-stage::
+	$(ECHO_NOTHING)plutil -replace CFBundleShortVersionString -string $(PACKAGE_VERSION) $(THEOS_STAGING_DIR)/Applications/jb-p1lot.app/Info.plist$(ECHO_END)
+	$(ECHO_NOTHING)plutil -replace CFBundleVersion -string $(PACKAGE_VERSION) $(THEOS_STAGING_DIR)/Applications/jb-p1lot.app/Info.plist$(ECHO_END)
 	$(ECHO_NOTHING)mkdir -p $(THEOS_STAGING_DIR)/usr/share/jb-p1lot$(ECHO_END)
 	$(ECHO_NOTHING)cp device/resources/debugserver-entitlements.plist $(THEOS_STAGING_DIR)/usr/share/jb-p1lot/$(ECHO_END)
 	$(ECHO_NOTHING)mkdir -p $(THEOS_STAGING_DIR)/Library/LaunchDaemons$(ECHO_END)

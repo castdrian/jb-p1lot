@@ -876,6 +876,15 @@ static void JBP1lotSleepUntil(uint64_t deadline) {
     usleep((useconds_t)(nanoseconds / 1000));
 }
 
+static BOOL JBP1lotFail(NSString **failureReason, NSString *reason) {
+    *failureReason = reason;
+    return NO;
+}
+
+static BOOL JBP1lotTouch(CGFloat x, CGFloat y, BOOL down, NSString **failureReason) {
+    return JBP1lotHIDPoint(x, y, down) || JBP1lotFail(failureReason, @"touch HID event could not be dispatched");
+}
+
 static BOOL JBP1lotPerformPathGesture(NSArray<NSValue *> *points, NSUInteger durationMs, NSString *easing) {
     NSMutableArray<NSNumber *> *offsets = [NSMutableArray arrayWithObject:@0];
     for (NSUInteger index = 1; index < points.count; index++) {
@@ -910,10 +919,10 @@ static BOOL JBP1lotPerformPathGesture(NSArray<NSValue *> *points, NSUInteger dur
 BOOL JBP1lotInjectAction(NSDictionary *params, NSString **failureReason) {
     NSString *action = [params[@"action"] isKindOfClass:[NSString class]] ? [params[@"action"] lowercaseString] : @"";
     if ([action isEqualToString:@"screen_off"] || [action isEqualToString:@"display_off"] || [action isEqualToString:@"dark_on"]) {
-        return JBP1lotSetDisplayEnabled(NO);
+        return JBP1lotSetDisplayEnabled(NO) || JBP1lotFail(failureReason, @"display state could not be changed");
     }
     if ([action isEqualToString:@"screen_on"] || [action isEqualToString:@"display_on"] || [action isEqualToString:@"dark_off"]) {
-        return JBP1lotSetDisplayEnabled(YES);
+        return JBP1lotSetDisplayEnabled(YES) || JBP1lotFail(failureReason, @"display state could not be changed");
     }
     if ([action isEqualToString:@"wake"]) {
         JBP1lotRunOnMain(^{
@@ -940,15 +949,18 @@ BOOL JBP1lotInjectAction(NSDictionary *params, NSString **failureReason) {
     BOOL hasPoint = NO;
     if (params[@"x"] != nil && params[@"y"] != nil)
         hasPoint = JBP1lotPointFromValue(@{ @"x": params[@"x"], @"y": params[@"y"] }, &x, &y);
+    BOOL isPointAction = [@[@"tap", @"press", @"long_press"] containsObject:action];
+    if (isPointAction && !hasPoint)
+        return JBP1lotFail(failureReason, [NSString stringWithFormat:@"%@ needs numeric x and y", action]);
     if ([action isEqualToString:@"tap"] || [action isEqualToString:@"press"]) {
-        return hasPoint && JBP1lotHIDPoint(x, y, YES) && JBP1lotHIDPoint(x, y, NO);
+        return JBP1lotTouch(x, y, YES, failureReason) && JBP1lotTouch(x, y, NO, failureReason);
     }
     if ([action isEqualToString:@"long_press"]) {
-        if (!hasPoint || !JBP1lotHIDPoint(x, y, YES)) {
+        if (!JBP1lotTouch(x, y, YES, failureReason)) {
             return NO;
         }
         usleep((useconds_t)MAX(100, [params[@"durationMs"] integerValue]) * 1000);
-        return JBP1lotHIDPoint(x, y, NO);
+        return JBP1lotTouch(x, y, NO, failureReason);
     }
     if ([action isEqualToString:@"swipe"] || [action isEqualToString:@"drag"]) {
         NSArray *values = [params[@"points"] isKindOfClass:[NSArray class]] ? params[@"points"] : @[];
@@ -967,7 +979,7 @@ BOOL JBP1lotInjectAction(NSDictionary *params, NSString **failureReason) {
             hasPoint = YES;
         }
         if (!hasPoint || requestedPoints.count == 0) {
-            return NO;
+            return JBP1lotFail(failureReason, [NSString stringWithFormat:@"%@ needs at least one point", action]);
         }
 
         NSMutableArray<NSValue *> *points = [NSMutableArray arrayWithCapacity:requestedPoints.count + 1];
@@ -979,15 +991,17 @@ BOOL JBP1lotInjectAction(NSDictionary *params, NSString **failureReason) {
                 [points addObject:value];
         }
         if (points.count < 2)
-            return NO;
+            return JBP1lotFail(failureReason, [NSString stringWithFormat:@"%@ needs a point other than its start", action]);
 
         NSUInteger durationMs = MAX(40, MIN([params[@"durationMs"] unsignedIntegerValue] ?: 200, 5000));
         NSString *easing = [params[@"easing"] isKindOfClass:[NSString class]] ? [params[@"easing"] lowercaseString] : @"linear";
-        return JBP1lotPerformPathGesture(points, durationMs, easing);
+        return JBP1lotPerformPathGesture(points, durationMs, easing) || JBP1lotFail(failureReason, @"touch HID event could not be dispatched");
     }
     if ([action isEqualToString:@"text"]) {
         NSString *text = [params[@"text"] isKindOfClass:[NSString class]] ? params[@"text"] : @"";
-        return JBP1lotInsertText(text);
+        return JBP1lotInsertText(text) || JBP1lotFail(failureReason, @"text could not be inserted into the focused field");
     }
-    return NO;
+    if (action.length == 0)
+        return JBP1lotFail(failureReason, @"no action given");
+    return JBP1lotFail(failureReason, [NSString stringWithFormat:@"unsupported action \"%@\"", action]);
 }

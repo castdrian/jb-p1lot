@@ -22,4 +22,4 @@ locking the device, so taps, accessibility, and `screen_capture` keep working.
 A physical triple press of the home button toggles it, as does volume up, volume down, volume up in quick succession on devices without one, and `ui_action` or
 `device_action` with `blackout_off`, `blackout_on` (or `screen_off`), or
 `blackout_toggle` sets it remotely. `screen_on` only wakes SpringBoard and
-leaves the blackout as it is. The choice persists across daemon restarts.
+leaves the blackout as it is. The choice persists across daemon restarts. `device_status` reports it under `display`: `blackout`, what last changed it (`source`: `button_combo`, `request` and so on) and when (`changedAt`), whether the panel is actually lit (`panelLit`, from the backlight current), and the button combos that toggle it.

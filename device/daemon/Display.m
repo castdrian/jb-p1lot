@@ -13,6 +13,7 @@ static dispatch_queue_t JBP1lotDisplayQueue;
 static dispatch_source_t JBP1lotDisplayTimer;
 static BOOL JBP1lotBlackout = YES;
 static NSString *JBP1lotBlackoutSource = @"default";
+static NSDate *JBP1lotBlackoutChangedAt;
 static NSDate *JBP1lotLastAgentRefresh;
 static int JBP1lotToggleToken;
 
@@ -49,8 +50,18 @@ static BOOL JBP1lotTellAgent(BOOL blackout) {
     return delivered;
 }
 
+static void JBP1lotRecordBlackoutChange(NSString *source) {
+    JBP1lotBlackoutSource = source;
+    JBP1lotBlackoutChangedAt = NSDate.date;
+}
+
 static void JBP1lotPersistDisplayState(void) {
-    NSData *data = [NSJSONSerialization dataWithJSONObject:@{ @"blackout": @(JBP1lotBlackout) } options:0 error:nil];
+    NSDictionary *state = @{
+        @"blackout": @(JBP1lotBlackout),
+        @"source": JBP1lotBlackoutSource,
+        @"changedAt": @((long long)(JBP1lotBlackoutChangedAt.timeIntervalSince1970 * 1000)),
+    };
+    NSData *data = [NSJSONSerialization dataWithJSONObject:state options:0 error:nil];
     [data writeToFile:JBP1lotDisplayStatePath atomically:YES];
 }
 
@@ -90,11 +101,13 @@ void JBP1lotDisplayStart(void) {
     NSDictionary *state = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
     if ([state isKindOfClass:[NSDictionary class]] && state[@"blackout"]) {
         JBP1lotBlackout = [state[@"blackout"] boolValue];
-        JBP1lotBlackoutSource = @"persisted";
+        JBP1lotBlackoutSource = [state[@"source"] isKindOfClass:[NSString class]] ? state[@"source"] : @"persisted";
+        if ([state[@"changedAt"] isKindOfClass:[NSNumber class]])
+            JBP1lotBlackoutChangedAt = [NSDate dateWithTimeIntervalSince1970:[state[@"changedAt"] doubleValue] / 1000];
     }
     notify_register_dispatch(JBP1lotBlackoutToggleNotification, &JBP1lotToggleToken, JBP1lotDisplayQueue, ^(int token) {
         JBP1lotBlackout = !JBP1lotBlackout;
-        JBP1lotBlackoutSource = @"button_combo";
+        JBP1lotRecordBlackoutChange(@"button_combo");
         JBP1lotPersistDisplayState();
         JBP1lotApplyBlackout();
     });
@@ -113,7 +126,7 @@ BOOL JBP1lotSetBlackout(BOOL enabled, NSString *source) {
     __block BOOL performed = NO;
     dispatch_sync(JBP1lotDisplayQueue, ^{
         JBP1lotBlackout = enabled;
-        JBP1lotBlackoutSource = source ?: @"request";
+        JBP1lotRecordBlackoutChange(source ?: @"request");
         JBP1lotPersistDisplayState();
         performed = JBP1lotApplyBlackout();
     });
@@ -138,9 +151,20 @@ BOOL JBP1lotBlackoutEnabled(void) {
 NSDictionary *JBP1lotDisplayStatus(void) {
     __block NSDictionary *status = nil;
     dispatch_sync(JBP1lotDisplayQueue, ^{
-        NSMutableDictionary *payload = [@{ @"blackout": @(JBP1lotBlackout), @"source": JBP1lotBlackoutSource } mutableCopy];
+        NSMutableDictionary *payload = [@{
+            @"blackout": @(JBP1lotBlackout),
+            @"source": JBP1lotBlackoutSource,
+            @"toggleCombos": @[ @"home,home,home", @"volume_up,volume_down,volume_up" ],
+        } mutableCopy];
+        if (JBP1lotBlackoutChangedAt) {
+            NSISO8601DateFormatter *formatter = [NSISO8601DateFormatter new];
+            payload[@"changedAt"] = [formatter stringFromDate:JBP1lotBlackoutChangedAt];
+        }
         NSNumber *current = JBP1lotBacklightMicroAmps();
-        if (current) payload[@"backlightMicroAmps"] = current;
+        if (current) {
+            payload[@"backlightMicroAmps"] = current;
+            payload[@"panelLit"] = @((BOOL)(current.integerValue > 0));
+        }
         status = payload;
     });
     return status;

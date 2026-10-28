@@ -366,6 +366,8 @@ NSDictionary *JBP1lotHandleRequest(NSDictionary *request) {
         NSString *action = [[JBP1lotString(params, @"action") lowercaseString] stringByReplacingOccurrencesOfString:@"-" withString:@"_"];
         NSDictionary *display = JBP1lotDisplayActionResponse(action);
         if (display) return display;
+        if ([@[ @"tap", @"press", @"long_press", @"swipe", @"drag", @"text" ] containsObject:action])
+            JBP1lotPowerPanelForInput();
         NSDictionary *targetError = nil;
         NSDictionary *target = JBP1lotResolveUITarget(params, &targetError);
         if (!target) return @{ @"status": @"error", @"error": targetError };

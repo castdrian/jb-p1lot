@@ -16,6 +16,9 @@ static NSString *JBP1lotBlackoutSource = @"default";
 static NSDate *JBP1lotBlackoutChangedAt;
 static NSDate *JBP1lotLastAgentRefresh;
 static int JBP1lotToggleToken;
+static NSDate *JBP1lotInputWindowEnds;
+static NSTimeInterval const JBP1lotInputWindow = 2.5;
+static useconds_t const JBP1lotDigitizerWakeMicroseconds = 250000;
 
 typedef int (*JBP1lotFramebufferMainFn)(void **);
 typedef int (*JBP1lotFramebufferPowerFn)(void *, int);
@@ -84,8 +87,19 @@ static BOOL JBP1lotSpringBoardScreenOn(void) {
     return on ? [on boolValue] : YES;
 }
 
+static BOOL JBP1lotInputWindowOpen(void) {
+    return JBP1lotInputWindowEnds && JBP1lotInputWindowEnds.timeIntervalSinceNow > 0;
+}
+
+static void JBP1lotCloseInputWindow(void) {
+    if (!JBP1lotBlackout || JBP1lotInputWindowOpen()) return;
+    JBP1lotInputWindowEnds = nil;
+    JBP1lotRequestPanelPower(NO);
+}
+
 static void JBP1lotReassertBlackout(void) {
     if (!JBP1lotBlackout) return;
+    if (JBP1lotInputWindowOpen()) return;
     if (!JBP1lotSpringBoardScreenOn()) return;
     if (!JBP1lotLastAgentRefresh || -JBP1lotLastAgentRefresh.timeIntervalSinceNow >= JBP1lotAgentRefreshInterval) JBP1lotTellAgent(YES);
     NSNumber *current = JBP1lotBacklightMicroAmps();
@@ -137,6 +151,21 @@ void JBP1lotRefreshBlackout(void) {
     dispatch_sync(JBP1lotDisplayQueue, ^{
         if (JBP1lotBlackout)
             JBP1lotApplyBlackout();
+    });
+}
+
+void JBP1lotPowerPanelForInput(void) {
+    dispatch_sync(JBP1lotDisplayQueue, ^{
+        if (!JBP1lotBlackout) return;
+        BOOL alreadyPowered = JBP1lotInputWindowOpen();
+        JBP1lotInputWindowEnds = [NSDate dateWithTimeIntervalSinceNow:JBP1lotInputWindow];
+        if (!alreadyPowered) {
+            JBP1lotRequestPanelPower(YES);
+            usleep(JBP1lotDigitizerWakeMicroseconds);
+        }
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((JBP1lotInputWindow + 0.1) * NSEC_PER_SEC)), JBP1lotDisplayQueue, ^{
+            JBP1lotCloseInputWindow();
+        });
     });
 }
 

@@ -459,20 +459,41 @@ static BOOL JBP1lotTryPrivateText(NSString *text) {
     return performed;
 }
 
+static BOOL JBP1lotEveryCharacterTappable(NSString *text) {
+    CGSize size = UIScreen.mainScreen.bounds.size;
+    for (NSUInteger index = 0; index < text.length; index++) {
+        CGPoint point = CGPointZero;
+        BOOL shift = NO;
+        if (!JBP1lotKeyboardKeyPoint([text characterAtIndex:index], size, &point, &shift))
+            return NO;
+    }
+    return YES;
+}
+
+static BOOL JBP1lotEveryCharacterTypeable(NSString *text) {
+    for (NSUInteger index = 0; index < text.length; index++) {
+        uint32_t usage = 0;
+        BOOL shift = NO;
+        if (!JBP1lotKeyboardUsage([text characterAtIndex:index], &usage, &shift))
+            return NO;
+    }
+    return YES;
+}
+
 static BOOL JBP1lotInsertText(NSString *text) {
     if (text.length == 0)
         return YES;
 
-    if (JBP1lotInsertTextWithKeyboardTaps(text))
-        return YES;
-
-    if (JBP1lotTryPrivateText(text))
+    if (JBP1lotEveryCharacterTypeable(text) && JBP1lotInsertTextWithKeyboardEvents(text))
         return YES;
 
     if (JBP1lotPasteText(text))
         return YES;
 
-    return JBP1lotInsertTextWithKeyboardEvents(text);
+    if (JBP1lotTryPrivateText(text))
+        return YES;
+
+    return JBP1lotEveryCharacterTappable(text) && JBP1lotInsertTextWithKeyboardTaps(text);
 }
 
 static BOOL JBP1lotPasscodeLocked(void) {

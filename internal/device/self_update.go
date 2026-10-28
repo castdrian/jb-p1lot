@@ -17,6 +17,7 @@ const (
 	selfUpdateTimeout      = 90 * time.Second
 	selfUpdatePollInterval = 2 * time.Second
 	selfUpdateLog          = "/var/tmp/jb-p1lot-self-update.log"
+	unlockAfterUpdateWait  = 30 * time.Second
 )
 
 type bridgeState struct {
@@ -67,7 +68,32 @@ func (m *Manager) selfUpdate(ctx context.Context, selected discovery.Device, req
 		"version":         current.version,
 		"hostVersion":     jbp1lot.Version,
 		"restartMs":       time.Since(started).Milliseconds(),
+		"unlocked":        m.unlockAfterRespring(ctx, selected),
 	}}, nil
+}
+
+func (m *Manager) unlockAfterRespring(ctx context.Context, selected discovery.Device) bool {
+	deadline := time.Now().Add(unlockAfterUpdateWait)
+	for time.Now().Before(deadline) {
+		if client, err := m.client(ctx, selected); err == nil {
+			response, callErr := client.Call(ctx, "ui_action", map[string]any{"action": "button", "button": "home"})
+			if callErr == nil && response.Status != "error" && pressed(response.Payload) {
+				return true
+			}
+			m.invalidateClient(client)
+		}
+		if err := pause(ctx); err != nil {
+			return false
+		}
+	}
+	return false
+}
+
+func pressed(response json.RawMessage) bool {
+	var result struct {
+		Performed bool `json:"performed"`
+	}
+	return json.Unmarshal(response, &result) == nil && result.Performed
 }
 
 func detachedInstallCommand(staged string) string {

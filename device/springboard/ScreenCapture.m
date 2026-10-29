@@ -6,7 +6,7 @@
 #import <objc/message.h>
 #import "DisplayControl.h"
 
-extern UIImage *_UICreateScreenUIImage(void) __attribute__((weak_import));
+extern UIImage *_UICreateScreenUIImage(void) __attribute__((weak_import, ns_returns_retained));
 
 typedef CGImageRef (*JBP1lotWindowImageFunction)(CGRect, uint32_t, uint32_t, uint32_t);
 typedef kern_return_t (*JBP1lotRenderDisplayFunction)(mach_port_t, CFStringRef, IOSurfaceRef, int, int);

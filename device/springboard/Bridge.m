@@ -154,7 +154,9 @@ static void JBP1lotAcceptLoop(void) {
         while (JBP1lotSocket >= 0) {
             int client = accept(JBP1lotSocket, NULL, NULL);
             if (client < 0) continue;
-            JBP1lotHandleAgentConnection(client);
+            @autoreleasepool {
+                JBP1lotHandleAgentConnection(client);
+            }
         }
     });
 }

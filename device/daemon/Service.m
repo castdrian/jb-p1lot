@@ -99,6 +99,29 @@ static mode_t JBP1lotMode(NSDictionary *params) {
     return (mode_t)parsed;
 }
 
+static NSDictionary *JBP1lotAppendFile(NSString *path, NSData *data, NSString *renameTo, mode_t mode) {
+    if (![[NSFileManager defaultManager] fileExistsAtPath:path] && ![[NSFileManager defaultManager] createFileAtPath:path contents:nil attributes:nil]) {
+        return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"backend_error", @"file append failed: the file could not be created") };
+    }
+    NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:path];
+    NSError *error = nil;
+    unsigned long long size = 0;
+    BOOL written = handle && [handle seekToEndReturningOffset:nil error:&error] && [handle writeData:data error:&error] && [handle getOffset:&size error:&error];
+    [handle closeFile];
+    if (!written) {
+        return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"backend_error", [NSString stringWithFormat:@"file append failed: %@", error.localizedDescription ?: @"unknown error"]) };
+    }
+    NSString *finalPath = path;
+    if (renameTo.length > 0) {
+        if (rename(path.fileSystemRepresentation, renameTo.fileSystemRepresentation) != 0) {
+            return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"backend_error", @"file append failed: the finished file could not be moved into place") };
+        }
+        finalPath = renameTo;
+    }
+    chmod(finalPath.fileSystemRepresentation, mode);
+    return @{ @"status": @"ok", @"payload": @{ @"path": finalPath, @"bytes": @(data.length), @"size": @(size), @"appended": @YES } };
+}
+
 static NSDictionary *JBP1lotRunResult(NSString *command, NSInteger timeoutMs) {
     int status = 0;
     NSData *output = JBP1lotRunShell(command, @"", timeoutMs, &status);
@@ -217,6 +240,10 @@ NSDictionary *JBP1lotHandleRequest(NSDictionary *request) {
         NSString *encoding = [JBP1lotString(params, @"encoding") lowercaseString];
         NSData *data = [encoding isEqualToString:@"base64"] ? [[NSData alloc] initWithBase64EncodedString:value options:0] : [value dataUsingEncoding:NSUTF8StringEncoding];
         if (!data) data = [NSData data];
+        if ([params[@"append"] boolValue]) {
+            if ([params[@"truncate"] boolValue]) unlink(path.fileSystemRepresentation);
+            return JBP1lotAppendFile(path, data, JBP1lotString(params, @"renameTo"), JBP1lotMode(params));
+        }
         NSString *temporary = [path stringByAppendingFormat:@".jb-p1lot-%@", NSUUID.UUID.UUIDString];
         if (![data writeToFile:temporary options:NSDataWritingFileProtectionNone error:nil] || rename(temporary.fileSystemRepresentation, path.fileSystemRepresentation) != 0) {
             unlink(temporary.fileSystemRepresentation);

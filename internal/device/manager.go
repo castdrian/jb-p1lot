@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	jbp1lot "github.com/castdrian/jb-p1lot"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -137,7 +138,8 @@ func (m *Manager) Execute(ctx context.Context, request registry.Request) (regist
 		return m.responseResult(request.Command, response)
 	}
 	if request.Command == "file_transfer" {
-		return m.fileTransfer(ctx, client, params)
+		reconnect := func() (*transport.Client, error) { return m.client(ctx, selected) }
+		return m.fileTransfer(ctx, client, reconnect, params)
 	}
 	if request.Command == "debug_session" || request.Command == "frida_session" {
 		return m.remoteSession(ctx, client, selected, request.Command, params)
@@ -329,7 +331,7 @@ func (m *Manager) pymobiledeviceScreenshot(ctx context.Context, deviceID string)
 	return registry.Result{Image: data, MIMEType: "image/png", ArtifactPath: path, Meta: map[string]any{"protectedLayers": false, "source": "pymobiledevice3"}}, nil
 }
 
-func (m *Manager) fileTransfer(ctx context.Context, client *transport.Client, params map[string]any) (registry.Result, error) {
+func (m *Manager) fileTransfer(ctx context.Context, client *transport.Client, reconnect func() (*transport.Client, error), params map[string]any) (registry.Result, error) {
 	source := paramString(params, "source", "")
 	destination := paramString(params, "destination", "")
 	if source == "" || destination == "" {
@@ -352,13 +354,40 @@ func (m *Manager) fileTransfer(ctx context.Context, client *transport.Client, pa
 		if len(data) > protocol.MaxFrameBytes {
 			return registry.Result{}, protocol.NewError(protocol.ErrFrameTooLarge, "transfer exceeds protocol limit", map[string]any{"bytes": len(data), "limit": protocol.MaxFrameBytes})
 		}
-		writeParams := map[string]any{"path": destination, "data": base64.StdEncoding.EncodeToString(data), "encoding": "base64"}
-		if mode, ok := params["mode"]; ok && mode != nil {
-			writeParams["mode"] = mode
-		}
-		response, err := client.Call(ctx, "file_write", writeParams)
-		if err != nil {
+		call := func(writeParams map[string]any) (transport.Response, error) {
+			if mode, ok := params["mode"]; ok && mode != nil {
+				writeParams["mode"] = mode
+			}
+			response, err := client.Call(ctx, "file_write", writeParams)
+			if err == nil {
+				return response, nil
+			}
 			m.invalidateClient(client)
+			retry, reconnectErr := reconnect()
+			if reconnectErr != nil {
+				return transport.Response{}, transferFailure(destination, err)
+			}
+			client = retry
+			if response, err = client.Call(ctx, "file_write", writeParams); err != nil {
+				m.invalidateClient(client)
+				return transport.Response{}, transferFailure(destination, err)
+			}
+			return response, nil
+		}
+		var response transport.Response
+		for index, chunk := range transferChunks(data, transferChunkBytes) {
+			writeParams := chunkParams(destination, chunk, index, len(data) > transferChunkBytes, index == len(transferChunks(data, transferChunkBytes))-1)
+			if response, err = call(writeParams); err != nil {
+				return registry.Result{}, err
+			}
+			if response.Status == "error" {
+				return m.responseResult("file_transfer", response)
+			}
+			if err := confirmWritten(response.Payload, len(chunk)); err != nil {
+				return registry.Result{}, err
+			}
+		}
+		if err := confirmSize(response.Payload, len(data)); err != nil {
 			return registry.Result{}, err
 		}
 		return m.responseResult("file_transfer", response)
@@ -709,6 +738,72 @@ func existingForward(deviceID string) *usbMuxForward {
 		if localErr == nil && remoteErr == nil && localPort > 0 && remotePort == 5912 {
 			return &usbMuxForward{port: localPort}
 		}
+	}
+	return nil
+}
+
+func transferFailure(destination string, err error) error {
+	reason := err.Error()
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		reason = "the device bridge closed the connection mid-transfer"
+	}
+	return protocol.NewError(protocol.ErrBackend, "file transfer to "+destination+" failed: "+reason, map[string]any{"destination": destination})
+}
+
+func confirmWritten(payload []byte, expected int) error {
+	var written struct {
+		Bytes *int `json:"bytes"`
+	}
+	if err := json.Unmarshal(payload, &written); err != nil || written.Bytes == nil {
+		return nil
+	}
+	if *written.Bytes != expected {
+		return protocol.NewError(protocol.ErrBackend, fmt.Sprintf("file transfer wrote %d of %d bytes", *written.Bytes, expected), map[string]any{"written": *written.Bytes, "expected": expected})
+	}
+	return nil
+}
+
+const transferChunkBytes = 1 << 20
+
+func transferChunks(data []byte, size int) [][]byte {
+	if len(data) <= size {
+		return [][]byte{data}
+	}
+	chunks := make([][]byte, 0, (len(data)+size-1)/size)
+	for start := 0; start < len(data); start += size {
+		chunks = append(chunks, data[start:min(start+size, len(data))])
+	}
+	return chunks
+}
+
+func chunkParams(destination string, chunk []byte, index int, chunked, last bool) map[string]any {
+	writeParams := map[string]any{"path": destination, "data": base64.StdEncoding.EncodeToString(chunk), "encoding": "base64"}
+	if !chunked {
+		return writeParams
+	}
+	part := destination + ".jb-p1lot-part"
+	writeParams["path"] = part
+	writeParams["append"] = index > 0
+	if index == 0 {
+		writeParams["append"] = true
+		writeParams["truncate"] = true
+	}
+	if last {
+		writeParams["renameTo"] = destination
+	}
+	return writeParams
+}
+
+func confirmSize(payload []byte, expected int) error {
+	var written struct {
+		Size     *int `json:"size"`
+		Appended bool `json:"appended"`
+	}
+	if err := json.Unmarshal(payload, &written); err != nil || !written.Appended || written.Size == nil {
+		return nil
+	}
+	if *written.Size != expected {
+		return protocol.NewError(protocol.ErrBackend, fmt.Sprintf("file transfer left %d of %d bytes on the device", *written.Size, expected), map[string]any{"size": *written.Size, "expected": expected})
 	}
 	return nil
 }

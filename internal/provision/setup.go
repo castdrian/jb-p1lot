@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	jbp1lot "github.com/castdrian/jb-p1lot"
+	"github.com/castdrian/jb-p1lot/internal/helper"
 	"math/big"
 	"os"
 	"os/exec"
@@ -127,7 +128,7 @@ func checkTools(ctx context.Context) []ToolCheck {
 		{"GNU Make", "gmake", []string{"--version"}, true},
 		{"ldid", "ldid", []string{"-h"}, true},
 		{"Go", "go", []string{"version"}, true},
-		{"pymobiledevice3", "pymobiledevice3", []string{"--version"}, true},
+		{"idevice helper", helper.IdeviceName, []string{"version"}, true},
 		{"libimobiledevice", "idevice_id", []string{"--version"}, true},
 		{"LLDB", "lldb", []string{"--version"}, true},
 		{"SSH", "ssh", []string{"-V"}, true},
@@ -234,7 +235,11 @@ func provisionDevice(ctx context.Context, device discovery.Device, packagePath s
 	if err := runSSH(ctx, options, "printf '%s\n' alpine | sudo -S /var/jb/usr/bin/dpkg -i /var/mobile/jb-p1lot.deb"); err != nil {
 		return fmt.Errorf("install device package: %w", err)
 	}
-	if err := runCommand(ctx, "pymobiledevice3", "mounter", "auto-mount", "--udid", device.ID); err != nil {
+	tool, err := helper.Idevice()
+	if err != nil {
+		return fmt.Errorf("find %s (build it with cargo install --path helpers/idevice): %w", helper.IdeviceName, err)
+	}
+	if err := runCommand(ctx, tool, "mount", device.ID); err != nil {
 		return fmt.Errorf("mount Developer Disk Image: %w", err)
 	}
 	return nil

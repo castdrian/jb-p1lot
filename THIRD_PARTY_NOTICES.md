@@ -17,3 +17,7 @@ source file is distributed in this repository.
 The host imports github.com/modelcontextprotocol/go-sdk under its MIT license.
 
 Source: https://github.com/modelcontextprotocol/go-sdk
+
+## idevice
+
+`helpers/idevice` depends on the [idevice](https://github.com/jkcoxson/idevice) crate by Jackson Coxson, MIT licensed.

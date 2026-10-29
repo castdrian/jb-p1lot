@@ -54,6 +54,11 @@ python3 scripts/validate_plugin.py plugins/jb-p1lot
 python3 scripts/validate_skill.py skills/jb-p1lot
 ```
 
+`cargo install --path helpers/idevice` builds `jb-p1lot-idevice`, which mounts
+the developer disk image from Xcode's copy and takes screenshots over the
+iOS 17+ developer tunnel with the `idevice` crate. Setup and the screenshot
+fallback use it, so pymobiledevice3 is no longer needed.
+
 `gmake deploy DEVICE=<udid>` builds the package, installs it on the device with
 `self_update`, waits for the bridge to restart, and fails unless the device
 reports the host's version.

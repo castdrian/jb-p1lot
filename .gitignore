@@ -18,3 +18,4 @@ certs/
 !layout/icon.png
 !plugins/jb-p1lot/bin/
 !plugins/jb-p1lot/bin/*
+helpers/idevice/target/

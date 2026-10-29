@@ -1,0 +1,14 @@
+[package]
+name = "jb-p1lot-idevice"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "jb-p1lot-idevice"
+path = "src/main.rs"
+
+[dependencies]
+idevice = { version = "=0.1.68", features = ["usbmuxd", "core_device_proxy", "tunnel_tcp_stack", "rsd", "dvt", "mobile_image_mounter", "tss"] }
+plist = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

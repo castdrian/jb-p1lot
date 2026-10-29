@@ -184,3 +184,10 @@ func TestLookupSettlesOnAddress(t *testing.T) {
 		t.Fatal("the resolved address did not settle the lookup")
 	}
 }
+
+func TestParseDeviceInfoReadsNameModelAndVersion(t *testing.T) {
+	info := parseDeviceInfo("BasebandVersion: 1.0\nDeviceName: Adrian’s iPhone\nProductType: iPhone12,8\nProductVersion: 26.0.1\n")
+	if info.Name != "Adrian’s iPhone" || info.Product != "iPhone12,8" || info.OSVersion != "26.0.1" {
+		t.Fatalf("unexpected device info: %+v", info)
+	}
+}

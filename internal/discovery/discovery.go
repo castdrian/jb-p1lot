@@ -39,6 +39,32 @@ type usbmuxRecord struct {
 	Identifier     string `json:"Identifier"`
 }
 
+type deviceInfo struct {
+	Name      string
+	Product   string
+	OSVersion string
+}
+
+func parseDeviceInfo(value string) deviceInfo {
+	var info deviceInfo
+	for _, line := range strings.Split(value, "\n") {
+		key, field, ok := strings.Cut(line, ": ")
+		if !ok {
+			continue
+		}
+		field = strings.TrimSpace(field)
+		switch key {
+		case "DeviceName":
+			info.Name = field
+		case "ProductType":
+			info.Product = field
+		case "ProductVersion":
+			info.OSVersion = field
+		}
+	}
+	return info
+}
+
 type bonjourService struct {
 	instance string
 	typeName string
@@ -96,9 +122,34 @@ func DiscoverWithRunner(ctx context.Context, run Runner) ([]Device, error) {
 			}
 		}
 	}
+	var unnamed []string
+	for id, device := range merged {
+		if device.Name == "" && device.Connection == "usb" {
+			unnamed = append(unnamed, id)
+		}
+	}
+	var detailWait sync.WaitGroup
+	var detailMutex sync.Mutex
+	for _, id := range unnamed {
+		detailWait.Add(1)
+		go func(id string) {
+			defer detailWait.Done()
+			output, err := run(ctx, "ideviceinfo", "-u", id)
+			if err != nil {
+				return
+			}
+			info := parseDeviceInfo(string(output))
+			detailMutex.Lock()
+			defer detailMutex.Unlock()
+			device := merged[id]
+			device.Name, device.Product, device.OSVersion = info.Name, info.Product, info.OSVersion
+			merged[id] = device
+		}(id)
+	}
+	var lookups [][]byte
 	if len(browseOutput) > 0 {
 		services := parseBonjourBrowse(string(browseOutput))
-		lookups := make([][]byte, len(services))
+		lookups = make([][]byte, len(services))
 		var lookupWait sync.WaitGroup
 		for index, service := range services {
 			lookupWait.Add(1)
@@ -108,11 +159,12 @@ func DiscoverWithRunner(ctx context.Context, run Runner) ([]Device, error) {
 			}(index, service)
 		}
 		lookupWait.Wait()
-		for _, lookupOutput := range lookups {
-			host, port, ok := parseBonjourLookup(string(lookupOutput))
-			if ok {
-				mergeBonjourEndpoint(merged, host, port)
-			}
+	}
+	detailWait.Wait()
+	for _, lookupOutput := range lookups {
+		host, port, ok := parseBonjourLookup(string(lookupOutput))
+		if ok {
+			mergeBonjourEndpoint(merged, host, port)
 		}
 	}
 	devices := make([]Device, 0, len(merged))

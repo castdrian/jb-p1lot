@@ -360,6 +360,9 @@ NSDictionary *JBP1lotHandleRequest(NSDictionary *request) {
     if ([method isEqualToString:@"metrics_stream"]) {
         return JBP1lotMetricsSample(params);
     }
+    if ([method isEqualToString:@"process_memory"]) {
+        return JBP1lotProcessMemory(params);
+    }
     if ([method isEqualToString:@"network_capture"]) {
         NSString *path = [NSString stringWithFormat:@"/var/mobile/Media/jb-p1lot/capture-%@.pcap", NSUUID.UUID.UUIDString];
         NSString *interface = JBP1lotString(params, @"interface");

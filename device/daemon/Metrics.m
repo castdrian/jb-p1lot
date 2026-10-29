@@ -207,3 +207,34 @@ NSDictionary *JBP1lotMetricsSample(NSDictionary *params) {
     }
     return @{ @"status": @"ok", @"payload": @{ @"intervalMs": @(interval * 1000), @"durationMs": @(llround(-startDate.timeIntervalSinceNow * 1000)), @"summary": JBP1lotSummary(samples), @"samples": samples } };
 }
+
+NSDictionary *JBP1lotProcessMemory(NSDictionary *params) {
+    NSString *query = [params[@"process"] isKindOfClass:[NSString class]] ? [params[@"process"] lowercaseString] : nil;
+    NSInteger limit = [params[@"limit"] integerValue] ?: 15;
+    int capacity = proc_listallpids(NULL, 0) + 64;
+    pid_t *pids = calloc((size_t)capacity, sizeof(pid_t));
+    int count = proc_listallpids(pids, capacity * (int)sizeof(pid_t));
+    NSMutableArray<NSDictionary *> *processes = [NSMutableArray array];
+    double megabyte = 1048576.0;
+    for (int index = 0; index < count; index++) {
+        char name[256] = {0};
+        proc_name(pids[index], name, sizeof(name));
+        NSString *processName = @(name);
+        if (query.length && ![processName.lowercaseString containsString:query]) continue;
+        struct rusage_info_v4 usage = {0};
+        if (!JBP1lotProcessUsage(pids[index], &usage)) continue;
+        [processes addObject:@{
+            @"pid": @(pids[index]),
+            @"name": processName,
+            @"footprintMB": @(JBP1lotRound(usage.ri_phys_footprint / megabyte)),
+            @"peakFootprintMB": @(JBP1lotRound(usage.ri_lifetime_max_phys_footprint / megabyte)),
+            @"residentMB": @(JBP1lotRound(usage.ri_resident_size / megabyte)),
+        }];
+    }
+    free(pids);
+    [processes sortUsingComparator:^NSComparisonResult(NSDictionary *left, NSDictionary *right) {
+        return [right[@"footprintMB"] compare:left[@"footprintMB"]];
+    }];
+    NSArray *listed = [processes subarrayWithRange:NSMakeRange(0, MIN((NSUInteger)MAX(limit, 1), processes.count))];
+    return @{ @"status": @"ok", @"payload": @{ @"processes": listed, @"matched": @(processes.count) } };
+}

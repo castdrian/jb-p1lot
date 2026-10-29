@@ -10,6 +10,8 @@ with `--follow true` it streams live entries for `--durationMs`. Filter with
 Use `metrics_stream --durationMs --intervalMs` for samples of per-core CPU,
 memory, GPU utilization, battery power, per-interface network rates, and, with
 `--process`, the CPU, footprint, energy, and disk rates of one process.
+Use `process_memory` for an instant list of processes by memory footprint, with
+each one's peak; `--process` filters by name and `--limit` caps the list.
 Use `crash_manage` for crash reports and `diagnostics_collect` for sysdiagnose.
 
 Use `debug_session` to attach debugserver with `--pid`, `--process`, or

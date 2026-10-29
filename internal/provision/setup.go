@@ -63,6 +63,11 @@ func Run(ctx context.Context, options Options) (Report, error) {
 		options.RepoRoot, _ = os.Getwd()
 	}
 	report := Report{Version: jbp1lot.Version, Platform: runtime.GOOS + "/" + runtime.GOARCH, Actions: []string{}}
+	if installed, err := ensureIdeviceHelper(ctx, options.RepoRoot); err != nil {
+		report.Warnings = append(report.Warnings, err.Error())
+	} else if installed {
+		report.Actions = append(report.Actions, "installed "+helper.IdeviceName)
+	}
 	report.Checks = checkTools(ctx)
 	identity, identityErr := EnsureIdentity()
 	report.Identity = identity
@@ -161,6 +166,31 @@ func requiredMissing(checks []ToolCheck) bool {
 		}
 	}
 	return false
+}
+
+const helperRepository = "https://github.com/castdrian/jb-p1lot"
+
+func helperInstallArgs(root string) []string {
+	manifest := filepath.Join(root, "helpers", "idevice", "Cargo.toml")
+	if root != "" && filesExist(manifest) {
+		return []string{"install", "--locked", "--path", filepath.Dir(manifest)}
+	}
+	return []string{"install", "--locked", "--git", helperRepository, helper.IdeviceName}
+}
+
+func ensureIdeviceHelper(ctx context.Context, root string) (bool, error) {
+	if _, err := helper.Idevice(); err == nil {
+		return false, nil
+	}
+	cargo, err := exec.LookPath("cargo")
+	if err != nil {
+		return false, fmt.Errorf("%s is missing and cargo is not installed; install Rust with rustup, then rerun setup", helper.IdeviceName)
+	}
+	command := exec.CommandContext(ctx, cargo, helperInstallArgs(root)...)
+	if output, err := command.CombinedOutput(); err != nil {
+		return false, fmt.Errorf("install %s: %w: %s", helper.IdeviceName, err, bounded(output))
+	}
+	return true, nil
 }
 
 func buildHost(ctx context.Context, root string) (string, error) {

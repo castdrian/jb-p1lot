@@ -54,10 +54,13 @@ python3 scripts/validate_plugin.py plugins/jb-p1lot
 python3 scripts/validate_skill.py skills/jb-p1lot
 ```
 
-`cargo install --path helpers/idevice` builds `jb-p1lot-idevice`, which mounts
+`jb-p1lot setup` builds and installs `jb-p1lot-idevice` with cargo when it is
+missing (`cargo install --path helpers/idevice` does the same by hand). It lists
+devices, mounts
 the developer disk image from Xcode's copy and takes screenshots over the
-iOS 17+ developer tunnel with the `idevice` crate. Setup and the screenshot
-fallback use it, so pymobiledevice3 is no longer needed.
+iOS 17+ developer tunnel with the `idevice` crate. Discovery, setup and the
+screenshot fallback use it, so neither pymobiledevice3 nor libimobiledevice's
+device tools are needed.
 
 `gmake deploy DEVICE=<udid>` builds the package, installs it on the device with
 `self_update`, waits for the bridge to restart, and fails unless the device

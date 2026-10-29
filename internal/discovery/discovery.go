@@ -249,14 +249,82 @@ func parseBonjour(value string) []Device {
 	return records
 }
 
+const (
+	bonjourTimeout = 2 * time.Second
+	bonjourQuiet   = 400 * time.Millisecond
+)
+
 func defaultRunner(ctx context.Context, command string, args ...string) ([]byte, error) {
-	timeout := 5 * time.Second
 	if command == "dns-sd" {
-		timeout = 2 * time.Second
+		return runUntilSettled(ctx, bonjourSettled(args), command, args...)
 	}
-	callCtx, cancel := context.WithTimeout(ctx, timeout)
+	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	return exec.CommandContext(callCtx, command, args...).CombinedOutput()
+}
+
+func bonjourSettled(args []string) func(string) bool {
+	if len(args) > 0 && args[0] == "-L" {
+		return func(line string) bool { return strings.Contains(line, "can be reached at") }
+	}
+	return browseBatchEnded
+}
+
+func browseBatchEnded(line string) bool {
+	fields := strings.Fields(line)
+	if len(fields) < 3 || (fields[1] != "Add" && fields[1] != "Rmv") {
+		return false
+	}
+	flags, err := strconv.Atoi(fields[2])
+	return err == nil && flags&1 == 0
+}
+
+func runUntilSettled(ctx context.Context, settled func(string) bool, command string, args ...string) ([]byte, error) {
+	callCtx, cancel := context.WithTimeout(ctx, bonjourTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(callCtx, command, args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	lines := make(chan string)
+	go func() {
+		defer close(lines)
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+	}()
+	var output strings.Builder
+	quiet := time.NewTimer(bonjourQuiet)
+	defer quiet.Stop()
+	defer func() {
+		cancel()
+		for range lines {
+		}
+		_ = cmd.Wait()
+	}()
+	for {
+		select {
+		case line, ok := <-lines:
+			if !ok {
+				return []byte(output.String()), nil
+			}
+			output.WriteString(line)
+			output.WriteByte('\n')
+			if settled(line) {
+				return []byte(output.String()), nil
+			}
+			quiet.Reset(bonjourQuiet)
+		case <-quiet.C:
+			return []byte(output.String()), nil
+		case <-callCtx.Done():
+			return []byte(output.String()), nil
+		}
+	}
 }
 
 func parseBonjourBrowse(value string) []bonjourService {

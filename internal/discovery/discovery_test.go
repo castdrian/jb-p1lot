@@ -162,3 +162,25 @@ func TestDiscoverForFallsBackWhenTheDeviceIsNotPluggedIn(t *testing.T) {
 		t.Fatalf("expected the full discovery, ran %v", ran)
 	}
 }
+
+func TestBrowseBatchEndsOnLastRecord(t *testing.T) {
+	more := "21:19:07.645  Add        3  17 local.               _jb-p1lot._tcp.      jb-p1lot"
+	last := "21:19:07.645  Add        2  13 local.               _jb-p1lot._tcp.      jb-p1lot"
+	header := "Timestamp     A/R    Flags  if Domain               Service Type         Instance Name"
+	if browseBatchEnded(more) || browseBatchEnded(header) {
+		t.Fatal("a record with more coming or the header ended the batch")
+	}
+	if !browseBatchEnded(last) {
+		t.Fatal("the last record of a batch did not end it")
+	}
+}
+
+func TestLookupSettlesOnAddress(t *testing.T) {
+	settled := bonjourSettled([]string{"-L", "jb-p1lot", "_jb-p1lot._tcp", "local."})
+	if settled("Lookup jb-p1lot._jb-p1lot._tcp.local.") {
+		t.Fatal("the lookup header settled the lookup")
+	}
+	if !settled("21:19:07.700  jb-p1lot._jb-p1lot._tcp.local. can be reached at iPhone.local.:8642 (interface 13)") {
+		t.Fatal("the resolved address did not settle the lookup")
+	}
+}

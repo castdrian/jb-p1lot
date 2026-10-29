@@ -52,13 +52,8 @@ func TestSelectDoesNotGuessPinnedUDIDWithMultipleBridges(t *testing.T) {
 func TestDiscoverMergesUSBDiagnostics(t *testing.T) {
 	runner := func(_ context.Context, command string, args ...string) ([]byte, error) {
 		switch command {
-		case "idevice_id":
-			if args[0] == "-l" {
-				return []byte("00008030-001624583AF9402E\n"), nil
-			}
-			return nil, nil
-		case "ideviceinfo":
-			return []byte("DeviceName: SE\nProductType: iPhone12,8\nProductVersion: 26.0.1\n"), nil
+		case "jb-p1lot-idevice":
+			return []byte(`[{"udid":"00008030-001624583AF9402E","connection":"usb","name":"SE","productType":"iPhone12,8","osVersion":"26.0.1"}]`), nil
 		default:
 			return nil, nil
 		}
@@ -72,16 +67,8 @@ func TestDiscoverMergesUSBDiagnostics(t *testing.T) {
 func TestDiscoverResolvesBonjourServiceToPairedDevice(t *testing.T) {
 	runner := func(_ context.Context, command string, args ...string) ([]byte, error) {
 		switch command {
-		case "idevice_id":
-			if args[0] == "-n" {
-				return []byte("00008130-000A2D412182001C\nfff48:e1:5c:79:40:83fff\n"), nil
-			}
-			return nil, nil
-		case "ideviceinfo":
-			if args[0] != "-n" {
-				return nil, errors.New("expected a network lookup")
-			}
-			return []byte("DeviceName: Adrian’s iPhone\nProductType: iPhone16,2\nProductVersion: 27.0\n"), nil
+		case "jb-p1lot-idevice":
+			return []byte(`[{"udid":"00008130-000A2D412182001C","connection":"network","name":"Adrian’s iPhone","productType":"iPhone16,2","osVersion":"27.0"},{"udid":"fff48:e1:5c:79:40:83fff","connection":"network","name":"TV"}]`), nil
 		case "dns-sd":
 			if len(args) > 0 && args[0] == "-B" {
 				return []byte("Timestamp     A/R    Flags  IF Domain               Service Type         Instance Name\n17:59:28.057  Add        3  15 local.               _jb-p1lot._tcp.      jb-p1lot\n17:59:28.057  Add        3  13 local.               _jb-p1lot._tcp.      jb-p1lot\n"), errors.New("command timed out")
@@ -111,13 +98,8 @@ func TestParseBonjourLookupSupportsIPv6Endpoint(t *testing.T) {
 func TestDiscoverKeepsUSBMuxTransportWhenBonjourIsAvailable(t *testing.T) {
 	runner := func(_ context.Context, command string, args ...string) ([]byte, error) {
 		switch command {
-		case "idevice_id":
-			if args[0] == "-l" {
-				return []byte("00008030-001624583AF9402E\n"), nil
-			}
-			return nil, nil
-		case "ideviceinfo":
-			return []byte("DeviceName: SE\nProductType: iPhone12,8\nProductVersion: 26.0.1\n"), nil
+		case "jb-p1lot-idevice":
+			return []byte(`[{"udid":"00008030-001624583AF9402E","connection":"usb","name":"SE","productType":"iPhone12,8","osVersion":"26.0.1"}]`), nil
 		case "dns-sd":
 			if len(args) > 0 && args[0] == "-B" {
 				return []byte("17:59:28.057  Add        3  15 local. _jb-p1lot._tcp. jb-p1lot\n"), nil
@@ -144,8 +126,8 @@ func TestDiscoverForUsesAPluggedInDeviceWithoutTheSlowSources(t *testing.T) {
 		mutex.Lock()
 		commands = append(commands, command)
 		mutex.Unlock()
-		if command == "idevice_id" {
-			return []byte("00008030-001624583AF9402E\n"), nil
+		if command == "jb-p1lot-idevice" && len(args) == 2 && args[1] == "--brief" {
+			return []byte(`[{"udid":"00008030-001624583AF9402E","connection":"usb"}]`), nil
 		}
 		return nil, errors.New("not expected")
 	}
@@ -154,7 +136,7 @@ func TestDiscoverForUsesAPluggedInDeviceWithoutTheSlowSources(t *testing.T) {
 		t.Fatalf("unexpected devices %#v, %v", devices, err)
 	}
 	if len(commands) != 1 {
-		t.Fatalf("expected only idevice_id, ran %v", commands)
+		t.Fatalf("expected only the brief listing, ran %v", commands)
 	}
 }
 
@@ -170,7 +152,7 @@ func TestDiscoverForFallsBackWhenTheDeviceIsNotPluggedIn(t *testing.T) {
 	if _, err := DiscoverForWithRunner(context.Background(), runner, "phone.local"); err != nil {
 		t.Fatal(err)
 	}
-	if !ran["idevice_id"] || !ran["dns-sd"] {
+	if !ran["jb-p1lot-idevice"] || !ran["dns-sd"] {
 		t.Fatalf("expected the full discovery, ran %v", ran)
 	}
 }
@@ -194,13 +176,6 @@ func TestLookupSettlesOnAddress(t *testing.T) {
 	}
 	if !settled("21:19:07.700  jb-p1lot._jb-p1lot._tcp.local. can be reached at iPhone.local.:8642 (interface 13)") {
 		t.Fatal("the resolved address did not settle the lookup")
-	}
-}
-
-func TestParseDeviceInfoReadsNameModelAndVersion(t *testing.T) {
-	info := parseDeviceInfo("BasebandVersion: 1.0\nDeviceName: Adrian’s iPhone\nProductType: iPhone12,8\nProductVersion: 26.0.1\n")
-	if info.Name != "Adrian’s iPhone" || info.Product != "iPhone12,8" || info.OSVersion != "26.0.1" {
-		t.Fatalf("unexpected device info: %+v", info)
 	}
 }
 

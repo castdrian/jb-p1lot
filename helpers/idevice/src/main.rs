@@ -8,7 +8,7 @@ use idevice::{
     mobile_image_mounter::ImageMounter,
     provider::{IdeviceProvider, UsbmuxdProvider},
     rsd::RsdHandshake,
-    usbmuxd::{UsbmuxdAddr, UsbmuxdConnection},
+    usbmuxd::{Connection, UsbmuxdAddr, UsbmuxdConnection, UsbmuxdDevice},
 };
 
 const LABEL: &str = "jb-p1lot";
@@ -19,11 +19,13 @@ async fn main() -> ExitCode {
     let arguments: Vec<String> = env::args().skip(1).collect();
     let result = match arguments.as_slice() {
         [command] if command == "version" => Ok(String::from(env!("CARGO_PKG_VERSION"))),
+        [command] if command == "list" => list(true).await,
+        [command, flag] if command == "list" && flag == "--brief" => list(false).await,
         [command, udid] if command == "mount" => mount(udid).await,
         [command, udid] if command == "unmount" => unmount(udid).await,
         [command, udid, output] if command == "screenshot" => screenshot(udid, output).await,
         _ => Err(String::from(
-            "usage: jb-p1lot-idevice version | mount <udid> | unmount <udid> | screenshot <udid> <output.png>",
+            "usage: jb-p1lot-idevice version | list [--brief] | mount <udid> | unmount <udid> | screenshot <udid> <output.png>",
         )),
     };
     match result {
@@ -47,6 +49,79 @@ async fn provider(udid: &str) -> Result<UsbmuxdProvider, String> {
     let device = usbmuxd.get_device(udid).await.map_err(describe)?;
     let address = UsbmuxdAddr::from_env_var().map_err(|error| error.to_string())?;
     Ok(device.to_provider(address, LABEL))
+}
+
+async fn describe_device(
+    device: UsbmuxdDevice,
+    address: UsbmuxdAddr,
+    details_wanted: bool,
+) -> serde_json::Value {
+    let connection = match device.connection_type {
+        Connection::Usb => "usb",
+        Connection::Network(_) => "network",
+        Connection::Unknown(_) => "unknown",
+    };
+    let provider = device.to_provider(address, LABEL);
+    let mut details = serde_json::Map::new();
+    if !details_wanted {
+        details.insert(String::from("udid"), serde_json::Value::from(device.udid));
+        details.insert(
+            String::from("connection"),
+            serde_json::Value::from(connection),
+        );
+        return serde_json::Value::Object(details);
+    }
+    if let Ok(mut lockdown) = LockdownClient::connect(&provider).await {
+        if let Ok(pairing) = provider.get_pairing_file().await {
+            let _ = lockdown.start_session(&pairing).await;
+        }
+        for (key, field) in [
+            ("DeviceName", "name"),
+            ("ProductType", "productType"),
+            ("ProductVersion", "osVersion"),
+        ] {
+            if let Ok(value) = lockdown.get_value(Some(key), None).await
+                && let Some(text) = value.as_string() {
+                    details.insert(String::from(field), serde_json::Value::from(text));
+                }
+        }
+    }
+    details.insert(String::from("udid"), serde_json::Value::from(device.udid));
+    details.insert(
+        String::from("connection"),
+        serde_json::Value::from(connection),
+    );
+    serde_json::Value::Object(details)
+}
+
+fn preferred(devices: Vec<UsbmuxdDevice>) -> Vec<UsbmuxdDevice> {
+    let mut chosen: Vec<UsbmuxdDevice> = Vec::new();
+    for device in devices {
+        let usb = matches!(device.connection_type, Connection::Usb);
+        match chosen.iter().position(|known| known.udid == device.udid) {
+            Some(index) if usb => chosen[index] = device,
+            Some(_) => {}
+            None => chosen.push(device),
+        }
+    }
+    chosen
+}
+
+async fn list(details_wanted: bool) -> Result<String, String> {
+    let mut usbmuxd = UsbmuxdConnection::default().await.map_err(describe)?;
+    let devices = preferred(usbmuxd.get_devices().await.map_err(describe)?);
+    let address = UsbmuxdAddr::from_env_var().map_err(|error| error.to_string())?;
+    let mut lookups = tokio::task::JoinSet::new();
+    for device in devices {
+        lookups.spawn(describe_device(device, address.clone(), details_wanted));
+    }
+    let mut described = Vec::new();
+    while let Some(result) = lookups.join_next().await {
+        if let Ok(value) = result {
+            described.push(value);
+        }
+    }
+    serde_json::to_string(&described).map_err(|error| error.to_string())
 }
 
 async fn unique_chip_id(provider: &UsbmuxdProvider) -> Result<u64, String> {

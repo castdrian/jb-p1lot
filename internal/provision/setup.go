@@ -129,7 +129,6 @@ func checkTools(ctx context.Context) []ToolCheck {
 		{"ldid", "ldid", []string{"-h"}, true},
 		{"Go", "go", []string{"version"}, true},
 		{"idevice helper", helper.IdeviceName, []string{"version"}, true},
-		{"libimobiledevice", "idevice_id", []string{"--version"}, true},
 		{"LLDB", "lldb", []string{"--version"}, true},
 		{"SSH", "ssh", []string{"-V"}, true},
 		{"usbmux tunnel", "iproxy", []string{"--help"}, true},

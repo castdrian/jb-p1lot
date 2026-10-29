@@ -3,8 +3,10 @@ package discovery
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/castdrian/jb-p1lot/internal/helper"
 	"net"
 	"os/exec"
 	"sort"
@@ -29,32 +31,6 @@ type Device struct {
 	Source     string `json:"source"`
 }
 
-type deviceInfo struct {
-	Name      string
-	Product   string
-	OSVersion string
-}
-
-func parseDeviceInfo(value string) deviceInfo {
-	var info deviceInfo
-	for _, line := range strings.Split(value, "\n") {
-		key, field, ok := strings.Cut(line, ": ")
-		if !ok {
-			continue
-		}
-		field = strings.TrimSpace(field)
-		switch key {
-		case "DeviceName":
-			info.Name = field
-		case "ProductType":
-			info.Product = field
-		case "ProductVersion":
-			info.OSVersion = field
-		}
-	}
-	return info
-}
-
 type bonjourService struct {
 	instance string
 	typeName string
@@ -71,17 +47,13 @@ func DiscoverWithRunner(ctx context.Context, run Runner) ([]Device, error) {
 	if run == nil {
 		run = defaultRunner
 	}
-	var usbOutput, networkOutput, browseOutput []byte
-	var usbErr, networkErr error
+	var listOutput, browseOutput []byte
+	var listErr error
 	var wait sync.WaitGroup
-	wait.Add(3)
+	wait.Add(2)
 	go func() {
 		defer wait.Done()
-		usbOutput, usbErr = run(ctx, "idevice_id", "-l")
-	}()
-	go func() {
-		defer wait.Done()
-		networkOutput, networkErr = run(ctx, "idevice_id", "-n")
+		listOutput, listErr = run(ctx, helper.IdeviceName, "list")
 	}()
 	go func() {
 		defer wait.Done()
@@ -90,32 +62,10 @@ func DiscoverWithRunner(ctx context.Context, run Runner) ([]Device, error) {
 	wait.Wait()
 
 	merged := make(map[string]Device)
-	addListed(merged, usbOutput, usbErr, "usb")
-	addListed(merged, networkOutput, networkErr, "network")
-	var unnamed []string
-	for id, device := range merged {
-		if device.Name == "" {
-			unnamed = append(unnamed, id)
+	if listErr == nil {
+		for _, device := range parseIdeviceList(listOutput) {
+			merged[device.ID] = device
 		}
-	}
-	var detailWait sync.WaitGroup
-	var detailMutex sync.Mutex
-	for _, id := range unnamed {
-		detailWait.Add(1)
-		args := deviceInfoArgs(merged[id])
-		go func(id string, args []string) {
-			defer detailWait.Done()
-			output, err := run(ctx, "ideviceinfo", args...)
-			if err != nil {
-				return
-			}
-			info := parseDeviceInfo(string(output))
-			detailMutex.Lock()
-			defer detailMutex.Unlock()
-			device := merged[id]
-			device.Name, device.Product, device.OSVersion = info.Name, info.Product, info.OSVersion
-			merged[id] = device
-		}(id, args)
 	}
 	var lookups [][]byte
 	if len(browseOutput) > 0 {
@@ -131,7 +81,6 @@ func DiscoverWithRunner(ctx context.Context, run Runner) ([]Device, error) {
 		}
 		lookupWait.Wait()
 	}
-	detailWait.Wait()
 	for _, lookupOutput := range lookups {
 		host, port, ok := parseBonjourLookup(string(lookupOutput))
 		if ok {
@@ -149,27 +98,31 @@ func DiscoverWithRunner(ctx context.Context, run Runner) ([]Device, error) {
 	return devices, nil
 }
 
-func addListed(merged map[string]Device, output []byte, err error, connection string) {
-	if err != nil {
-		return
-	}
-	for _, id := range strings.Fields(string(output)) {
-		if _, ok := merged[id]; ok || !looksLikeDeviceID(id) {
-			continue
-		}
-		merged[id] = Device{ID: id, Connection: connection, Paired: true, Source: "libimobiledevice"}
-	}
+type listedDevice struct {
+	UDID       string `json:"udid"`
+	Connection string `json:"connection"`
+	Name       string `json:"name"`
+	Product    string `json:"productType"`
+	OSVersion  string `json:"osVersion"`
 }
 
-func deviceInfoArgs(device Device) []string {
-	if device.Connection == "network" {
-		return []string{"-n", "-u", device.ID}
+func parseIdeviceList(output []byte) []Device {
+	var listed []listedDevice
+	if json.Unmarshal(output, &listed) != nil {
+		return nil
 	}
-	return []string{"-u", device.ID}
+	devices := make([]Device, 0, len(listed))
+	for _, entry := range listed {
+		if !looksLikeDeviceID(entry.UDID) {
+			continue
+		}
+		devices = append(devices, Device{ID: entry.UDID, Name: entry.Name, Product: entry.Product, OSVersion: entry.OSVersion, Connection: entry.Connection, Paired: true, Source: "idevice"})
+	}
+	return devices
 }
 
 // DiscoverFor finds the device a command names: one plugged in over USB is used as soon as
-// libimobiledevice lists it, skipping the slower usbmux and Bonjour sources.
+// the idevice helper lists it over USB, skipping the device details and Bonjour.
 func DiscoverFor(ctx context.Context, selector string) ([]Device, error) {
 	return DiscoverForWithRunner(ctx, defaultRunner, selector)
 }
@@ -179,10 +132,10 @@ func DiscoverForWithRunner(ctx context.Context, run Runner, selector string) ([]
 		run = defaultRunner
 	}
 	if selector != "" {
-		if output, err := run(ctx, "idevice_id", "-l"); err == nil {
-			for _, line := range strings.Fields(string(output)) {
-				if line == selector {
-					return []Device{{ID: line, Connection: "usb", Paired: true, Source: "libimobiledevice"}}, nil
+		if output, err := run(ctx, helper.IdeviceName, "list", "--brief"); err == nil {
+			for _, device := range parseIdeviceList(output) {
+				if device.ID == selector && device.Connection == "usb" {
+					return []Device{device}, nil
 				}
 			}
 		}
@@ -299,6 +252,13 @@ const (
 func defaultRunner(ctx context.Context, command string, args ...string) ([]byte, error) {
 	if command == "dns-sd" {
 		return runUntilSettled(ctx, bonjourSettled(args), command, args...)
+	}
+	if command == helper.IdeviceName {
+		path, err := helper.Idevice()
+		if err != nil {
+			return nil, err
+		}
+		command = path
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

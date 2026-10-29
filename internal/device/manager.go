@@ -392,24 +392,26 @@ func (m *Manager) fileTransfer(ctx context.Context, client *transport.Client, re
 		}
 		return m.responseResult("file_transfer", response)
 	case "device_to_host", "download", "to_host":
-		maxBytes := paramInt(params, "maxBytes", protocol.MaxFrameBytes)
-		if maxBytes <= 0 || maxBytes > protocol.MaxFrameBytes {
-			maxBytes = protocol.MaxFrameBytes
+		maxBytes := paramInt(params, "maxBytes", 0)
+		read := func(offset int) (transferRange, error) {
+			response, err := client.Call(ctx, "file_read", map[string]any{"path": source, "offset": offset, "maxBytes": transferChunkBytes})
+			if err != nil {
+				m.invalidateClient(client)
+				retry, reconnectErr := reconnect()
+				if reconnectErr != nil {
+					return transferRange{}, transferFailure(source, err)
+				}
+				client = retry
+				if response, err = client.Call(ctx, "file_read", map[string]any{"path": source, "offset": offset, "maxBytes": transferChunkBytes}); err != nil {
+					m.invalidateClient(client)
+					return transferRange{}, transferFailure(source, err)
+				}
+			}
+			return parseTransferRange(response.Payload)
 		}
-		response, err := client.Call(ctx, "file_read", map[string]any{"path": source, "maxBytes": maxBytes})
+		data, err := downloadChunks(read, maxBytes)
 		if err != nil {
-			m.invalidateClient(client)
 			return registry.Result{}, err
-		}
-		var payload struct {
-			Data string `json:"data"`
-		}
-		if err := json.Unmarshal(response.Payload, &payload); err != nil || payload.Data == "" {
-			return registry.Result{}, protocol.NewError(protocol.ErrBackend, "device file response was invalid", nil)
-		}
-		data, err := base64.StdEncoding.DecodeString(payload.Data)
-		if err != nil {
-			return registry.Result{}, protocol.NewError(protocol.ErrBackend, "device file data was not base64", nil)
 		}
 		if err := os.WriteFile(destination, data, 0o600); err != nil {
 			return registry.Result{}, fmt.Errorf("write transfer destination: %w", err)
@@ -806,4 +808,46 @@ func confirmSize(payload []byte, expected int) error {
 		return protocol.NewError(protocol.ErrBackend, fmt.Sprintf("file transfer left %d of %d bytes on the device", *written.Size, expected), map[string]any{"size": *written.Size, "expected": expected})
 	}
 	return nil
+}
+
+type transferRange struct {
+	Data   []byte
+	Offset int
+	Size   int
+}
+
+func parseTransferRange(payload []byte) (transferRange, error) {
+	var chunk struct {
+		Data   string `json:"data"`
+		Offset *int   `json:"offset"`
+		Size   *int   `json:"size"`
+	}
+	if err := json.Unmarshal(payload, &chunk); err != nil || chunk.Offset == nil || chunk.Size == nil {
+		return transferRange{}, protocol.NewError(protocol.ErrBackend, "device file response was invalid; update the daemon for ranged reads", nil)
+	}
+	data, err := base64.StdEncoding.DecodeString(chunk.Data)
+	if err != nil {
+		return transferRange{}, protocol.NewError(protocol.ErrBackend, "device file data was not base64", nil)
+	}
+	return transferRange{Data: data, Offset: *chunk.Offset, Size: *chunk.Size}, nil
+}
+
+func downloadChunks(read func(offset int) (transferRange, error), maxBytes int) ([]byte, error) {
+	var data []byte
+	for {
+		chunk, err := read(len(data))
+		if err != nil {
+			return nil, err
+		}
+		if chunk.Offset != len(data) {
+			return nil, protocol.NewError(protocol.ErrBackend, fmt.Sprintf("device file read came back at offset %d instead of %d", chunk.Offset, len(data)), nil)
+		}
+		data = append(data, chunk.Data...)
+		if maxBytes > 0 && len(data) >= maxBytes {
+			return data[:maxBytes], nil
+		}
+		if len(chunk.Data) == 0 || len(data) >= chunk.Size {
+			return data, nil
+		}
+	}
 }

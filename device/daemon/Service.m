@@ -99,6 +99,21 @@ static mode_t JBP1lotMode(NSDictionary *params) {
     return (mode_t)parsed;
 }
 
+static NSDictionary *JBP1lotReadRange(NSString *path, unsigned long long offset, NSUInteger maxBytes) {
+    NSError *error = nil;
+    NSFileHandle *handle = [NSFileHandle fileHandleForReadingFromURL:[NSURL fileURLWithPath:path] error:&error];
+    unsigned long long size = 0;
+    NSData *data = nil;
+    if (handle && [handle seekToEndReturningOffset:&size error:&error] && [handle seekToOffset:MIN(offset, size) error:&error]) {
+        data = [handle readDataUpToLength:(maxBytes > 0 ? maxBytes : (1u << 20)) error:&error];
+    }
+    [handle closeFile];
+    if (!data) {
+        return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"backend_error", [NSString stringWithFormat:@"file read failed: %@", error.localizedDescription ?: @"unknown error"]) };
+    }
+    return @{ @"status": @"ok", @"payload": @{ @"data": [data base64EncodedStringWithOptions:0], @"bytes": @(data.length), @"offset": @(MIN(offset, size)), @"size": @(size) } };
+}
+
 static NSDictionary *JBP1lotAppendFile(NSString *path, NSData *data, NSString *renameTo, mode_t mode) {
     if (![[NSFileManager defaultManager] fileExistsAtPath:path] && ![[NSFileManager defaultManager] createFileAtPath:path contents:nil attributes:nil]) {
         return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"backend_error", @"file append failed: the file could not be created") };
@@ -224,9 +239,14 @@ NSDictionary *JBP1lotHandleRequest(NSDictionary *request) {
     }
     if ([method isEqualToString:@"file_read"]) {
         NSString *path = JBP1lotString(params, @"path");
-        NSData *data = [NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:nil];
+        if (params[@"offset"]) {
+            return JBP1lotReadRange(path, [params[@"offset"] unsignedLongLongValue], [params[@"maxBytes"] unsignedIntegerValue]);
+        }
+        NSError *readError = nil;
+        NSData *data = [NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:&readError];
+        if (!data) data = [NSData dataWithContentsOfFile:path options:0 error:&readError];
         if (!data) {
-            return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"backend_error", @"file read failed") };
+            return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"backend_error", [NSString stringWithFormat:@"file read failed: %@", readError.localizedDescription ?: @"unknown error"]) };
         }
         NSUInteger maxBytes = [params[@"maxBytes"] unsignedIntegerValue];
         if (maxBytes > 0 && data.length > maxBytes) {

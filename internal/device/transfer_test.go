@@ -48,3 +48,27 @@ func TestLargeTransfersAreSentInChunksToAPartFile(t *testing.T) {
 		t.Fatal("expected a size mismatch")
 	}
 }
+
+func TestDownloadsAreReadInChunksUntilTheFileEnds(t *testing.T) {
+	file := []byte("abcdefghij")
+	var offsets []int
+	read := func(offset int) (transferRange, error) {
+		offsets = append(offsets, offset)
+		end := min(offset+4, len(file))
+		return transferRange{Data: file[offset:end], Offset: offset, Size: len(file)}, nil
+	}
+	data, err := downloadChunks(read, 0)
+	if err != nil || string(data) != "abcdefghij" {
+		t.Fatalf("unexpected download %q %v", data, err)
+	}
+	if fmt.Sprint(offsets) != "[0 4 8]" {
+		t.Fatalf("unexpected offsets %v", offsets)
+	}
+	limited, _ := downloadChunks(read, 6)
+	if string(limited) != "abcdef" {
+		t.Fatalf("unexpected limited download %q", limited)
+	}
+	if _, err := parseTransferRange([]byte(`{"data": "aGk=", "bytes": 2}`)); err == nil {
+		t.Fatal("expected an old daemon's response to be rejected")
+	}
+}

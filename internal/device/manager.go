@@ -71,7 +71,7 @@ func (m *Manager) Execute(ctx context.Context, request registry.Request) (regist
 			return registry.Result{}, protocol.NewError(protocol.ErrInvalidFrame, "hardware reboot is not exposed; use userspace_reboot", map[string]any{"action": action})
 		}
 	}
-	devices, err := discovery.Discover(ctx)
+	devices, err := discovery.DiscoverFor(ctx, request.Device)
 	if err != nil {
 		return registry.Result{}, fmt.Errorf("discover devices: %w", err)
 	}
@@ -164,7 +164,7 @@ func (m *Manager) deviceList(ctx context.Context) (registry.Result, error) {
 }
 
 func (m *Manager) deviceStatus(ctx context.Context, selector string) (registry.Result, error) {
-	devices, err := discovery.Discover(ctx)
+	devices, err := discovery.DiscoverFor(ctx, selector)
 	if err != nil {
 		return registry.Result{}, err
 	}

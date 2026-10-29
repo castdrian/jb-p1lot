@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 )
@@ -54,10 +55,28 @@ func DiscoverWithRunner(ctx context.Context, run Runner) ([]Device, error) {
 	if run == nil {
 		run = defaultRunner
 	}
+	var usbmuxOutput, ideviceOutput, browseOutput []byte
+	var usbmuxErr, ideviceErr error
+	var wait sync.WaitGroup
+	wait.Add(3)
+	go func() {
+		defer wait.Done()
+		usbmuxOutput, usbmuxErr = run(ctx, "pymobiledevice3", "usbmux", "list")
+	}()
+	go func() {
+		defer wait.Done()
+		ideviceOutput, ideviceErr = run(ctx, "idevice_id", "-l")
+	}()
+	go func() {
+		defer wait.Done()
+		browseOutput, _ = run(ctx, "dns-sd", "-B", "_jb-p1lot._tcp", "local.")
+	}()
+	wait.Wait()
+
 	merged := make(map[string]Device)
-	if output, err := run(ctx, "pymobiledevice3", "usbmux", "list"); err == nil {
+	if usbmuxErr == nil {
 		var records []usbmuxRecord
-		if json.Unmarshal(output, &records) == nil {
+		if json.Unmarshal(usbmuxOutput, &records) == nil {
 			for _, record := range records {
 				id := record.UniqueDeviceID
 				if id == "" {
@@ -70,16 +89,26 @@ func DiscoverWithRunner(ctx context.Context, run Runner) ([]Device, error) {
 			}
 		}
 	}
-	if output, err := run(ctx, "idevice_id", "-l"); err == nil {
-		for _, line := range strings.Fields(string(output)) {
+	if ideviceErr == nil {
+		for _, line := range strings.Fields(string(ideviceOutput)) {
 			if _, ok := merged[line]; !ok {
 				merged[line] = Device{ID: line, Connection: "usb", Paired: true, Source: "libimobiledevice"}
 			}
 		}
 	}
-	if output, _ := run(ctx, "dns-sd", "-B", "_jb-p1lot._tcp", "local."); len(output) > 0 {
-		for _, service := range parseBonjourBrowse(string(output)) {
-			lookupOutput, _ := run(ctx, "dns-sd", "-L", service.instance, service.typeName, service.domain)
+	if len(browseOutput) > 0 {
+		services := parseBonjourBrowse(string(browseOutput))
+		lookups := make([][]byte, len(services))
+		var lookupWait sync.WaitGroup
+		for index, service := range services {
+			lookupWait.Add(1)
+			go func(index int, service bonjourService) {
+				defer lookupWait.Done()
+				lookups[index], _ = run(ctx, "dns-sd", "-L", service.instance, service.typeName, service.domain)
+			}(index, service)
+		}
+		lookupWait.Wait()
+		for _, lookupOutput := range lookups {
 			host, port, ok := parseBonjourLookup(string(lookupOutput))
 			if ok {
 				mergeBonjourEndpoint(merged, host, port)
@@ -95,6 +124,28 @@ func DiscoverWithRunner(ctx context.Context, run Runner) ([]Device, error) {
 	}
 	sort.Slice(devices, func(i, j int) bool { return devices[i].ID < devices[j].ID })
 	return devices, nil
+}
+
+// DiscoverFor finds the device a command names: one plugged in over USB is used as soon as
+// libimobiledevice lists it, skipping the slower usbmux and Bonjour sources.
+func DiscoverFor(ctx context.Context, selector string) ([]Device, error) {
+	return DiscoverForWithRunner(ctx, defaultRunner, selector)
+}
+
+func DiscoverForWithRunner(ctx context.Context, run Runner, selector string) ([]Device, error) {
+	if run == nil {
+		run = defaultRunner
+	}
+	if selector != "" {
+		if output, err := run(ctx, "idevice_id", "-l"); err == nil {
+			for _, line := range strings.Fields(string(output)) {
+				if line == selector {
+					return []Device{{ID: line, Connection: "usb", Paired: true, Source: "libimobiledevice"}}, nil
+				}
+			}
+		}
+	}
+	return DiscoverWithRunner(ctx, run)
 }
 
 func Select(devices []Device, selector string) (Device, error) {

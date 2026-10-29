@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -121,5 +122,43 @@ func TestDiscoverKeepsUSBMuxTransportWhenBonjourIsAvailable(t *testing.T) {
 	device := devices[0]
 	if device.Connection != "usb" || device.Address != "" || !device.Bridge || device.Source != "usbmux+bonjour" {
 		t.Fatalf("device=%#v", device)
+	}
+}
+
+func TestDiscoverForUsesAPluggedInDeviceWithoutTheSlowSources(t *testing.T) {
+	var mutex sync.Mutex
+	var commands []string
+	runner := func(_ context.Context, command string, args ...string) ([]byte, error) {
+		mutex.Lock()
+		commands = append(commands, command)
+		mutex.Unlock()
+		if command == "idevice_id" {
+			return []byte("00008030-001624583AF9402E\n"), nil
+		}
+		return nil, errors.New("not expected")
+	}
+	devices, err := DiscoverForWithRunner(context.Background(), runner, "00008030-001624583AF9402E")
+	if err != nil || len(devices) != 1 || devices[0].Connection != "usb" {
+		t.Fatalf("unexpected devices %#v, %v", devices, err)
+	}
+	if len(commands) != 1 {
+		t.Fatalf("expected only idevice_id, ran %v", commands)
+	}
+}
+
+func TestDiscoverForFallsBackWhenTheDeviceIsNotPluggedIn(t *testing.T) {
+	var mutex sync.Mutex
+	ran := map[string]bool{}
+	runner := func(_ context.Context, command string, args ...string) ([]byte, error) {
+		mutex.Lock()
+		ran[command] = true
+		mutex.Unlock()
+		return nil, errors.New("nothing")
+	}
+	if _, err := DiscoverForWithRunner(context.Background(), runner, "phone.local"); err != nil {
+		t.Fatal(err)
+	}
+	if !ran["pymobiledevice3"] || !ran["dns-sd"] {
+		t.Fatalf("expected the full discovery, ran %v", ran)
 	}
 }

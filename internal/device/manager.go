@@ -695,7 +695,10 @@ func (m *Manager) ensureForward(device discovery.Device) (*usbMuxForward, error)
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
 	_ = listener.Close()
-	command := exec.Command("iproxy", strconv.Itoa(port), "5912", "-u", device.ID)
+	command, err := helper.ForwardCommand(device.ID, port, 5912)
+	if err != nil {
+		return nil, err
+	}
 	if err := command.Start(); err != nil {
 		return nil, err
 	}
@@ -715,7 +718,7 @@ func (m *Manager) ensureForward(device discovery.Device) (*usbMuxForward, error)
 	}
 	if !ready {
 		_ = command.Process.Kill()
-		return nil, errors.New("iproxy did not open a local tunnel")
+		return nil, errors.New("the port forward did not open a local tunnel")
 	}
 	m.mu.Lock()
 	m.forwards[device.ID] = forward
@@ -729,14 +732,8 @@ func existingForward(deviceID string) *usbMuxForward {
 		return nil
 	}
 	for _, line := range strings.Split(string(output), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 6 || filepath.Base(fields[1]) != "iproxy" || fields[4] != "-u" || fields[5] != deviceID {
-			continue
-		}
-		localPort, localErr := strconv.Atoi(fields[2])
-		remotePort, remoteErr := strconv.Atoi(fields[3])
-		if localErr == nil && remoteErr == nil && localPort > 0 && remotePort == 5912 {
-			return &usbMuxForward{port: localPort}
+		if forward, ok := helper.ParseForward(line, deviceID); ok && forward.LocalPort > 0 && forward.RemotePort == 5912 {
+			return &usbMuxForward{port: forward.LocalPort}
 		}
 	}
 	return nil

@@ -60,7 +60,7 @@ devices, mounts
 the developer disk image from Xcode's copy and takes screenshots over the
 iOS 17+ developer tunnel with the `idevice` crate. Discovery, setup and the
 screenshot fallback use it, so neither pymobiledevice3 nor libimobiledevice's
-device tools are needed.
+device tools or iproxy are needed: port forwards run through it as well.
 
 `gmake deploy DEVICE=<udid>` builds the package, installs it on the device with
 `self_update`, waits for the bridge to restart, and fails unless the device

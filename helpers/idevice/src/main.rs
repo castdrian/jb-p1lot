@@ -21,11 +21,14 @@ async fn main() -> ExitCode {
         [command] if command == "version" => Ok(String::from(env!("CARGO_PKG_VERSION"))),
         [command] if command == "list" => list(true).await,
         [command, flag] if command == "list" && flag == "--brief" => list(false).await,
+        [command, local, remote, flag, udid] if command == "forward" && flag == "-u" => {
+            forward(udid, local, remote).await
+        }
         [command, udid] if command == "mount" => mount(udid).await,
         [command, udid] if command == "unmount" => unmount(udid).await,
         [command, udid, output] if command == "screenshot" => screenshot(udid, output).await,
         _ => Err(String::from(
-            "usage: jb-p1lot-idevice version | list [--brief] | mount <udid> | unmount <udid> | screenshot <udid> <output.png>",
+            "usage: jb-p1lot-idevice version | list [--brief] | forward <local port> <device port> -u <udid> | mount <udid> | unmount <udid> | screenshot <udid> <output.png>",
         )),
     };
     match result {
@@ -81,9 +84,10 @@ async fn describe_device(
             ("ProductVersion", "osVersion"),
         ] {
             if let Ok(value) = lockdown.get_value(Some(key), None).await
-                && let Some(text) = value.as_string() {
-                    details.insert(String::from(field), serde_json::Value::from(text));
-                }
+                && let Some(text) = value.as_string()
+            {
+                details.insert(String::from(field), serde_json::Value::from(text));
+            }
         }
     }
     details.insert(String::from("udid"), serde_json::Value::from(device.udid));
@@ -183,6 +187,42 @@ async fn mount(udid: &str) -> Result<String, String> {
         .await
         .map_err(describe)?;
     Ok(String::from("mounted the developer disk image"))
+}
+
+fn port(value: &str) -> Result<u16, String> {
+    value
+        .parse::<u16>()
+        .map_err(|_| format!("{value} is not a port number"))
+}
+
+async fn bridge(mut client: tokio::net::TcpStream, device_id: u32, remote: u16) {
+    let Ok(usbmuxd) = UsbmuxdConnection::default().await else {
+        return;
+    };
+    let Ok(device) = usbmuxd.connect_to_device(device_id, remote, LABEL).await else {
+        return;
+    };
+    let Some(mut socket) = device.get_socket() else {
+        return;
+    };
+    let _ = tokio::io::copy_bidirectional(&mut client, &mut socket).await;
+}
+
+async fn forward(udid: &str, local: &str, remote: &str) -> Result<String, String> {
+    let local = port(local)?;
+    let remote = port(remote)?;
+    let mut usbmuxd = UsbmuxdConnection::default().await.map_err(describe)?;
+    let device_id = usbmuxd.get_device(udid).await.map_err(describe)?.device_id;
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", local))
+        .await
+        .map_err(|error| format!("could not listen on {local}: {error}"))?;
+    loop {
+        let (client, _) = listener
+            .accept()
+            .await
+            .map_err(|error| format!("could not accept a connection: {error}"))?;
+        tokio::spawn(bridge(client, device_id, remote));
+    }
 }
 
 async fn unmount(udid: &str) -> Result<String, String> {

@@ -136,7 +136,6 @@ func checkTools(ctx context.Context) []ToolCheck {
 		{"idevice helper", helper.IdeviceName, []string{"version"}, true},
 		{"LLDB", "lldb", []string{"--version"}, true},
 		{"SSH", "ssh", []string{"-V"}, true},
-		{"usbmux tunnel", "iproxy", []string{"--help"}, true},
 		{"Frida", "frida", []string{"--version"}, false},
 		{"sshpass", "sshpass", []string{"-V"}, false},
 	}
@@ -224,9 +223,11 @@ func provisionDevice(ctx context.Context, device discovery.Device, packagePath s
 	if packagePath == "" {
 		return errors.New("device package was not built; pairing skipped")
 	}
-	var tunnel *exec.Cmd
 	if options.SSHHost == "" && device.Connection == "usb" {
-		tunnel = exec.Command("iproxy", "2222", "22", "-u", device.ID)
+		tunnel, err := helper.ForwardCommand(device.ID, 2222, 22)
+		if err != nil {
+			return fmt.Errorf("start USB SSH tunnel: %w", err)
+		}
 		if err := tunnel.Start(); err != nil {
 			return fmt.Errorf("start USB SSH tunnel: %w", err)
 		}

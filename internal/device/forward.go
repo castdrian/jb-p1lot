@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/castdrian/jb-p1lot/internal/discovery"
+	"github.com/castdrian/jb-p1lot/internal/helper"
 	"github.com/castdrian/jb-p1lot/internal/protocol"
 	"github.com/castdrian/jb-p1lot/internal/registry"
 	"github.com/castdrian/jb-p1lot/internal/transport"
@@ -33,15 +33,8 @@ func listPortForwards(deviceID string) []portForwardEntry {
 	}
 	var entries []portForwardEntry
 	for _, line := range strings.Split(string(output), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 6 || filepath.Base(fields[1]) != "iproxy" || fields[4] != "-u" || fields[5] != deviceID {
-			continue
-		}
-		pid, pidErr := strconv.Atoi(fields[0])
-		local, localErr := strconv.Atoi(fields[2])
-		remote, remoteErr := strconv.Atoi(fields[3])
-		if pidErr == nil && localErr == nil && remoteErr == nil {
-			entries = append(entries, portForwardEntry{PID: pid, LocalPort: local, RemotePort: remote, Bridge: remote == 5912})
+		if forward, ok := helper.ParseForward(line, deviceID); ok {
+			entries = append(entries, portForwardEntry{PID: forward.PID, LocalPort: forward.LocalPort, RemotePort: forward.RemotePort, Bridge: forward.RemotePort == 5912})
 		}
 	}
 	return entries
@@ -74,10 +67,13 @@ func startPortForward(deviceID string, localPort, remotePort int) (portForwardEn
 		}
 		localPort = port
 	}
-	command := exec.Command("iproxy", strconv.Itoa(localPort), strconv.Itoa(remotePort), "-u", deviceID)
+	command, err := helper.ForwardCommand(deviceID, localPort, remotePort)
+	if err != nil {
+		return portForwardEntry{}, err
+	}
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := command.Start(); err != nil {
-		return portForwardEntry{}, fmt.Errorf("start iproxy: %w", err)
+		return portForwardEntry{}, fmt.Errorf("start the port forward: %w", err)
 	}
 	go func() { _ = command.Wait() }()
 	for attempt := 0; attempt < 30; attempt++ {
@@ -87,7 +83,7 @@ func startPortForward(deviceID string, localPort, remotePort int) (portForwardEn
 		time.Sleep(100 * time.Millisecond)
 	}
 	_ = command.Process.Kill()
-	return portForwardEntry{}, errors.New("iproxy did not open the local port")
+	return portForwardEntry{}, errors.New("the port forward did not open the local port")
 }
 
 func stopPortForwards(deviceID string, match func(portForwardEntry) bool) []portForwardEntry {

@@ -12,4 +12,4 @@ path = "src/main.rs"
 idevice = { version = "=0.1.68", features = ["usbmuxd", "core_device_proxy", "tunnel_tcp_stack", "rsd", "dvt", "mobile_image_mounter", "tss"] }
 plist = "1"
 serde_json = "1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util"] }

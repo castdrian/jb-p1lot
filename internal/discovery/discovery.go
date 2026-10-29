@@ -3,7 +3,6 @@ package discovery
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -28,15 +27,6 @@ type Device struct {
 	Jailbroken bool   `json:"jailbroken"`
 	Bridge     bool   `json:"bridge"`
 	Source     string `json:"source"`
-}
-
-type usbmuxRecord struct {
-	ConnectionType string `json:"ConnectionType"`
-	DeviceName     string `json:"DeviceName"`
-	ProductType    string `json:"ProductType"`
-	ProductVersion string `json:"ProductVersion"`
-	UniqueDeviceID string `json:"UniqueDeviceID"`
-	Identifier     string `json:"Identifier"`
 }
 
 type deviceInfo struct {
@@ -81,17 +71,17 @@ func DiscoverWithRunner(ctx context.Context, run Runner) ([]Device, error) {
 	if run == nil {
 		run = defaultRunner
 	}
-	var usbmuxOutput, ideviceOutput, browseOutput []byte
-	var usbmuxErr, ideviceErr error
+	var usbOutput, networkOutput, browseOutput []byte
+	var usbErr, networkErr error
 	var wait sync.WaitGroup
 	wait.Add(3)
 	go func() {
 		defer wait.Done()
-		usbmuxOutput, usbmuxErr = run(ctx, "pymobiledevice3", "usbmux", "list")
+		usbOutput, usbErr = run(ctx, "idevice_id", "-l")
 	}()
 	go func() {
 		defer wait.Done()
-		ideviceOutput, ideviceErr = run(ctx, "idevice_id", "-l")
+		networkOutput, networkErr = run(ctx, "idevice_id", "-n")
 	}()
 	go func() {
 		defer wait.Done()
@@ -100,31 +90,11 @@ func DiscoverWithRunner(ctx context.Context, run Runner) ([]Device, error) {
 	wait.Wait()
 
 	merged := make(map[string]Device)
-	if usbmuxErr == nil {
-		var records []usbmuxRecord
-		if json.Unmarshal(usbmuxOutput, &records) == nil {
-			for _, record := range records {
-				id := record.UniqueDeviceID
-				if id == "" {
-					id = record.Identifier
-				}
-				if id == "" {
-					continue
-				}
-				merged[id] = Device{ID: id, Name: record.DeviceName, Product: record.ProductType, OSVersion: record.ProductVersion, Connection: strings.ToLower(record.ConnectionType), Paired: true, Source: "usbmux"}
-			}
-		}
-	}
-	if ideviceErr == nil {
-		for _, line := range strings.Fields(string(ideviceOutput)) {
-			if _, ok := merged[line]; !ok {
-				merged[line] = Device{ID: line, Connection: "usb", Paired: true, Source: "libimobiledevice"}
-			}
-		}
-	}
+	addListed(merged, usbOutput, usbErr, "usb")
+	addListed(merged, networkOutput, networkErr, "network")
 	var unnamed []string
 	for id, device := range merged {
-		if device.Name == "" && device.Connection == "usb" {
+		if device.Name == "" {
 			unnamed = append(unnamed, id)
 		}
 	}
@@ -132,9 +102,10 @@ func DiscoverWithRunner(ctx context.Context, run Runner) ([]Device, error) {
 	var detailMutex sync.Mutex
 	for _, id := range unnamed {
 		detailWait.Add(1)
-		go func(id string) {
+		args := deviceInfoArgs(merged[id])
+		go func(id string, args []string) {
 			defer detailWait.Done()
-			output, err := run(ctx, "ideviceinfo", "-u", id)
+			output, err := run(ctx, "ideviceinfo", args...)
 			if err != nil {
 				return
 			}
@@ -144,7 +115,7 @@ func DiscoverWithRunner(ctx context.Context, run Runner) ([]Device, error) {
 			device := merged[id]
 			device.Name, device.Product, device.OSVersion = info.Name, info.Product, info.OSVersion
 			merged[id] = device
-		}(id)
+		}(id, args)
 	}
 	var lookups [][]byte
 	if len(browseOutput) > 0 {
@@ -176,6 +147,25 @@ func DiscoverWithRunner(ctx context.Context, run Runner) ([]Device, error) {
 	}
 	sort.Slice(devices, func(i, j int) bool { return devices[i].ID < devices[j].ID })
 	return devices, nil
+}
+
+func addListed(merged map[string]Device, output []byte, err error, connection string) {
+	if err != nil {
+		return
+	}
+	for _, id := range strings.Fields(string(output)) {
+		if _, ok := merged[id]; ok || !looksLikeDeviceID(id) {
+			continue
+		}
+		merged[id] = Device{ID: id, Connection: connection, Paired: true, Source: "libimobiledevice"}
+	}
+}
+
+func deviceInfoArgs(device Device) []string {
+	if device.Connection == "network" {
+		return []string{"-n", "-u", device.ID}
+	}
+	return []string{"-u", device.ID}
 }
 
 // DiscoverFor finds the device a command names: one plugged in over USB is used as soon as
@@ -455,14 +445,7 @@ func splitBonjourAddress(value string) (string, string, bool) {
 }
 
 func mergeBonjourEndpoint(merged map[string]Device, host string, port int) {
-	matchingID := ""
-	hostName := normalizeDeviceName(host)
-	for id, device := range merged {
-		if hostName != "" && hostName == normalizeDeviceName(device.Name) {
-			matchingID = id
-			break
-		}
-	}
+	matchingID := matchByName(merged, normalizeDeviceName(host))
 	if matchingID == "" && len(merged) == 1 {
 		for id := range merged {
 			matchingID = id
@@ -486,6 +469,29 @@ func mergeBonjourEndpoint(merged map[string]Device, host string, port int) {
 	current.Bridge = true
 	current.Paired = true
 	merged[matchingID] = current
+}
+
+func matchByName(merged map[string]Device, hostName string) string {
+	if hostName == "" {
+		return ""
+	}
+	ids := make([]string, 0, len(merged))
+	for id, device := range merged {
+		if hostName == normalizeDeviceName(device.Name) {
+			ids = append(ids, id)
+		}
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		left, right := merged[ids[i]].Connection == "usb", merged[ids[j]].Connection == "usb"
+		if left != right {
+			return left
+		}
+		return ids[i] < ids[j]
+	})
+	if len(ids) == 0 {
+		return ""
+	}
+	return ids[0]
 }
 
 func normalizeDeviceName(value string) string {

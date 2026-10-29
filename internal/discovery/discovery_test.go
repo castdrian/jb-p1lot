@@ -2,7 +2,6 @@ package discovery
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -51,19 +50,21 @@ func TestSelectDoesNotGuessPinnedUDIDWithMultipleBridges(t *testing.T) {
 }
 
 func TestDiscoverMergesUSBDiagnostics(t *testing.T) {
-	runner := func(_ context.Context, command string, _ ...string) ([]byte, error) {
+	runner := func(_ context.Context, command string, args ...string) ([]byte, error) {
 		switch command {
-		case "pymobiledevice3":
-			value, _ := json.Marshal([]map[string]string{{"ConnectionType": "USB", "DeviceName": "SE", "ProductType": "iPhone12,8", "ProductVersion": "26.0.1", "UniqueDeviceID": "u"}})
-			return value, nil
 		case "idevice_id":
-			return []byte("u\n"), nil
+			if args[0] == "-l" {
+				return []byte("00008030-001624583AF9402E\n"), nil
+			}
+			return nil, nil
+		case "ideviceinfo":
+			return []byte("DeviceName: SE\nProductType: iPhone12,8\nProductVersion: 26.0.1\n"), nil
 		default:
 			return nil, nil
 		}
 	}
 	devices, err := DiscoverWithRunner(context.Background(), runner)
-	if err != nil || len(devices) != 1 || devices[0].ID != "u" {
+	if err != nil || len(devices) != 1 || devices[0].ID != "00008030-001624583AF9402E" || devices[0].Name != "SE" || devices[0].Product != "iPhone12,8" || devices[0].OSVersion != "26.0.1" {
 		t.Fatalf("devices=%#v err=%v", devices, err)
 	}
 }
@@ -71,9 +72,16 @@ func TestDiscoverMergesUSBDiagnostics(t *testing.T) {
 func TestDiscoverResolvesBonjourServiceToPairedDevice(t *testing.T) {
 	runner := func(_ context.Context, command string, args ...string) ([]byte, error) {
 		switch command {
-		case "pymobiledevice3":
-			value, _ := json.Marshal([]map[string]string{{"ConnectionType": "Network", "DeviceName": "Adrian’s iPhone", "ProductType": "iPhone16,2", "ProductVersion": "27.0", "UniqueDeviceID": "u"}})
-			return value, nil
+		case "idevice_id":
+			if args[0] == "-n" {
+				return []byte("00008130-000A2D412182001C\nfff48:e1:5c:79:40:83fff\n"), nil
+			}
+			return nil, nil
+		case "ideviceinfo":
+			if args[0] != "-n" {
+				return nil, errors.New("expected a network lookup")
+			}
+			return []byte("DeviceName: Adrian’s iPhone\nProductType: iPhone16,2\nProductVersion: 27.0\n"), nil
 		case "dns-sd":
 			if len(args) > 0 && args[0] == "-B" {
 				return []byte("Timestamp     A/R    Flags  IF Domain               Service Type         Instance Name\n17:59:28.057  Add        3  15 local.               _jb-p1lot._tcp.      jb-p1lot\n17:59:28.057  Add        3  13 local.               _jb-p1lot._tcp.      jb-p1lot\n"), errors.New("command timed out")
@@ -88,7 +96,7 @@ func TestDiscoverResolvesBonjourServiceToPairedDevice(t *testing.T) {
 		t.Fatalf("devices=%#v err=%v", devices, err)
 	}
 	device := devices[0]
-	if device.ID != "u" || device.Address != "Adrians-iPhone.local." || device.Port != 5912 || device.Connection != "wifi" || !device.Bridge {
+	if device.ID != "00008130-000A2D412182001C" || device.Name != "Adrian’s iPhone" || device.Address != "Adrians-iPhone.local." || device.Port != 5912 || device.Connection != "wifi" || !device.Bridge {
 		t.Fatalf("device=%#v", device)
 	}
 }
@@ -103,9 +111,13 @@ func TestParseBonjourLookupSupportsIPv6Endpoint(t *testing.T) {
 func TestDiscoverKeepsUSBMuxTransportWhenBonjourIsAvailable(t *testing.T) {
 	runner := func(_ context.Context, command string, args ...string) ([]byte, error) {
 		switch command {
-		case "pymobiledevice3":
-			value, _ := json.Marshal([]map[string]string{{"ConnectionType": "USB", "DeviceName": "SE", "ProductType": "iPhone12,8", "ProductVersion": "26.0.1", "UniqueDeviceID": "u"}})
-			return value, nil
+		case "idevice_id":
+			if args[0] == "-l" {
+				return []byte("00008030-001624583AF9402E\n"), nil
+			}
+			return nil, nil
+		case "ideviceinfo":
+			return []byte("DeviceName: SE\nProductType: iPhone12,8\nProductVersion: 26.0.1\n"), nil
 		case "dns-sd":
 			if len(args) > 0 && args[0] == "-B" {
 				return []byte("17:59:28.057  Add        3  15 local. _jb-p1lot._tcp. jb-p1lot\n"), nil
@@ -158,7 +170,7 @@ func TestDiscoverForFallsBackWhenTheDeviceIsNotPluggedIn(t *testing.T) {
 	if _, err := DiscoverForWithRunner(context.Background(), runner, "phone.local"); err != nil {
 		t.Fatal(err)
 	}
-	if !ran["pymobiledevice3"] || !ran["dns-sd"] {
+	if !ran["idevice_id"] || !ran["dns-sd"] {
 		t.Fatalf("expected the full discovery, ran %v", ran)
 	}
 }
@@ -189,5 +201,17 @@ func TestParseDeviceInfoReadsNameModelAndVersion(t *testing.T) {
 	info := parseDeviceInfo("BasebandVersion: 1.0\nDeviceName: Adrian’s iPhone\nProductType: iPhone12,8\nProductVersion: 26.0.1\n")
 	if info.Name != "Adrian’s iPhone" || info.Product != "iPhone12,8" || info.OSVersion != "26.0.1" {
 		t.Fatalf("unexpected device info: %+v", info)
+	}
+}
+
+func TestBonjourPrefersTheUSBDeviceWhenNamesTie(t *testing.T) {
+	merged := map[string]Device{
+		"00008130-000A2D412182001C": {ID: "00008130-000A2D412182001C", Name: "Adrian’s iPhone", Connection: "network"},
+		"00008030-001624583AF9402E": {ID: "00008030-001624583AF9402E", Name: "Adrian’s iPhone", Connection: "usb"},
+	}
+	for attempt := 0; attempt < 20; attempt++ {
+		if id := matchByName(merged, normalizeDeviceName("Adrians-iPhone.local.")); id != "00008030-001624583AF9402E" {
+			t.Fatalf("matched %q", id)
+		}
 	}
 }

@@ -17,7 +17,8 @@ static NSDate *JBP1lotBlackoutChangedAt;
 static NSDate *JBP1lotLastAgentRefresh;
 static int JBP1lotToggleToken;
 static NSDate *JBP1lotInputWindowEnds;
-static NSTimeInterval const JBP1lotInputWindow = 2.5;
+static NSTimeInterval const JBP1lotInputSafetyWindow = 30.0;
+static NSTimeInterval const JBP1lotInputTail = 0.4;
 static useconds_t const JBP1lotDigitizerWakeMicroseconds = 250000;
 
 typedef int (*JBP1lotFramebufferMainFn)(void **);
@@ -97,6 +98,12 @@ static void JBP1lotCloseInputWindow(void) {
     JBP1lotRequestPanelPower(NO);
 }
 
+static void JBP1lotScheduleInputWindowClose(NSTimeInterval delay) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((delay + 0.05) * NSEC_PER_SEC)), JBP1lotDisplayQueue, ^{
+        JBP1lotCloseInputWindow();
+    });
+}
+
 static void JBP1lotReassertBlackout(void) {
     if (!JBP1lotBlackout) return;
     if (JBP1lotInputWindowOpen()) return;
@@ -158,14 +165,20 @@ void JBP1lotPowerPanelForInput(void) {
     dispatch_sync(JBP1lotDisplayQueue, ^{
         if (!JBP1lotBlackout) return;
         BOOL alreadyPowered = JBP1lotInputWindowOpen();
-        JBP1lotInputWindowEnds = [NSDate dateWithTimeIntervalSinceNow:JBP1lotInputWindow];
+        JBP1lotInputWindowEnds = [NSDate dateWithTimeIntervalSinceNow:JBP1lotInputSafetyWindow];
         if (!alreadyPowered) {
             JBP1lotRequestPanelPower(YES);
             usleep(JBP1lotDigitizerWakeMicroseconds);
         }
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((JBP1lotInputWindow + 0.1) * NSEC_PER_SEC)), JBP1lotDisplayQueue, ^{
-            JBP1lotCloseInputWindow();
-        });
+        JBP1lotScheduleInputWindowClose(JBP1lotInputSafetyWindow);
+    });
+}
+
+void JBP1lotFinishPanelInput(void) {
+    dispatch_sync(JBP1lotDisplayQueue, ^{
+        if (!JBP1lotBlackout || !JBP1lotInputWindowOpen()) return;
+        JBP1lotInputWindowEnds = [NSDate dateWithTimeIntervalSinceNow:JBP1lotInputTail];
+        JBP1lotScheduleInputWindowClose(JBP1lotInputTail);
     });
 }
 

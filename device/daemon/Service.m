@@ -416,19 +416,31 @@ NSDictionary *JBP1lotHandleRequest(NSDictionary *request) {
         NSString *action = [[JBP1lotString(params, @"action") lowercaseString] stringByReplacingOccurrencesOfString:@"-" withString:@"_"];
         NSDictionary *display = JBP1lotDisplayActionResponse(action);
         if (display) return display;
-        if ([@[ @"tap", @"press", @"long_press", @"swipe", @"drag", @"text" ] containsObject:action])
-            JBP1lotPowerPanelForInput();
+        BOOL panelInput = [@[ @"tap", @"press", @"long_press", @"swipe", @"drag", @"text" ] containsObject:action];
+        if (panelInput) JBP1lotPowerPanelForInput();
         NSDictionary *targetError = nil;
         NSDictionary *target = JBP1lotResolveUITarget(params, &targetError);
-        if (!target) return @{ @"status": @"error", @"error": targetError };
-        if (target != params) {
+        if (!target) {
+            if (panelInput) JBP1lotFinishPanelInput();
+            return @{ @"status": @"error", @"error": targetError };
+        }
+        if (target == params) {
+            NSDictionary *response = nil;
+            BOOL forwarded = JBP1lotForwardToAgent(request, &response);
+            if (panelInput) JBP1lotFinishPanelInput();
+            if (forwarded) return response;
+            return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"unavailable", @"SpringBoard agent is unavailable") };
+        }
+        {
             NSMutableDictionary *forwarded = [request mutableCopy];
             NSMutableDictionary *payload = [target mutableCopy];
             NSDictionary *node = payload[@"resolvedNode"];
             [payload removeObjectForKey:@"resolvedNode"];
             forwarded[@"payload"] = payload;
             NSDictionary *response = nil;
-            if (!JBP1lotForwardToAgent(forwarded, &response))
+            BOOL delivered = JBP1lotForwardToAgent(forwarded, &response);
+            if (panelInput) JBP1lotFinishPanelInput();
+            if (!delivered)
                 return @{ @"status": @"error", @"error": JBP1lotErrorPayload(@"unavailable", @"SpringBoard agent is unavailable") };
             if ([response[@"payload"] isKindOfClass:[NSDictionary class]] && ![response[@"status"] isEqual:@"error"]) {
                 NSMutableDictionary *merged = [response mutableCopy];

@@ -107,10 +107,11 @@ static void JBP1lotScheduleInputWindowClose(NSTimeInterval delay) {
 static void JBP1lotReassertBlackout(void) {
     if (!JBP1lotBlackout) return;
     if (JBP1lotInputWindowOpen()) return;
-    if (!JBP1lotSpringBoardScreenOn()) return;
-    if (!JBP1lotLastAgentRefresh || -JBP1lotLastAgentRefresh.timeIntervalSinceNow >= JBP1lotAgentRefreshInterval) JBP1lotTellAgent(YES);
     NSNumber *current = JBP1lotBacklightMicroAmps();
     if (current && current.integerValue == 0) return;
+    BOOL screenOn = JBP1lotSpringBoardScreenOn();
+    if (!current && !screenOn) return;
+    if (screenOn && (!JBP1lotLastAgentRefresh || -JBP1lotLastAgentRefresh.timeIntervalSinceNow >= JBP1lotAgentRefreshInterval)) JBP1lotTellAgent(YES);
     JBP1lotRequestPanelPower(YES);
     usleep(200000);
     JBP1lotRequestPanelPower(NO);
